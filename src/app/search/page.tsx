@@ -43,10 +43,11 @@ export default async function SearchPage({ searchParams }: Props) {
         .lean();
 
       jobs = JSON.parse(JSON.stringify(jobsDocs)) as IJob[];
-    } catch (err) {
-      console.error('[SearchPage] DB search query error:', err);
+    } catch {
+      console.error('[SearchPage] DB search query failed safely');
     }
   }
+
 
 
   return (

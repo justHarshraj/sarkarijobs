@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { runAllScrapers, runScraperForSource } from '@/lib/scraper';
 import { getScraperStatus } from '@/lib/scraper/scheduler';
+import { getSafeErrorMessage } from '@/lib/utils/sanitizer';
 
 export async function GET() {
   return NextResponse.json({
@@ -42,10 +43,10 @@ export async function POST(req: NextRequest) {
       results,
     });
   } catch (err: unknown) {
-    const message = err instanceof Error ? err.message : 'Scraper execution failed';
     return NextResponse.json(
-      { success: false, error: message },
+      { success: false, error: getSafeErrorMessage(err, 'Scraper execution failed') },
       { status: 500 }
     );
   }
 }
+

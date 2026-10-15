@@ -12,7 +12,8 @@ export default function GlobalError({
   reset: () => void;
 }) {
   useEffect(() => {
-    console.error('[Application Error Boundary caught error]:', error);
+    const digest = error?.digest ? ` (Reference ID: ${error.digest})` : '';
+    console.error(`[Application Notice] Page encounter was handled securely.${digest}`);
   }, [error]);
 
   return (

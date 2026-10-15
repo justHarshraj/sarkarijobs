@@ -62,10 +62,12 @@ export default async function JobDetailPage({ params }: Props) {
   try {
     await connectDB();
     jobDoc = await Job.findOne({ slug }).lean();
-  } catch (err) {
-    console.error('[JobDetailPage] DB query error:', err);
+  } catch {
+    console.error('[JobDetailPage] DB query error');
     notFound();
   }
+
+
 
   if (!jobDoc) {
     notFound();

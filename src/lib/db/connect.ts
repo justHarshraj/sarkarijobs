@@ -1,4 +1,5 @@
 import mongoose from 'mongoose';
+import { sanitizeText } from '@/lib/utils/sanitizer';
 
 /**
  * MongoDB connection singleton.
@@ -33,7 +34,7 @@ async function connectDB(): Promise<typeof mongoose> {
   // On Vercel or production: fail fast immediately if MONGODB_URI is not configured
   if (!uri && (process.env.VERCEL || process.env.NODE_ENV === 'production')) {
     const errMsg =
-      'MONGODB_URI environment variable is not configured in Vercel settings. Please add MONGODB_URI in Vercel Dashboard -> Settings -> Environment Variables.';
+      'MONGODB_URI environment variable is not configured. Please add MONGODB_URI in project environment variables.';
     console.error(`❌ [MongoDB] ${errMsg}`);
     throw new Error(errMsg);
   }
@@ -57,8 +58,8 @@ async function connectDB(): Promise<typeof mongoose> {
       })
       .catch((error) => {
         cached.promise = null;
-        console.error('❌ MongoDB connection error:', error.message || error);
-        throw error;
+        console.error('❌ MongoDB connection error:', sanitizeText(error?.message || error));
+        throw new Error('Database connection failed');
       });
   }
 
@@ -71,6 +72,7 @@ async function connectDB(): Promise<typeof mongoose> {
 
   return cached.conn;
 }
+
 
 export { connectDB };
 export default connectDB;

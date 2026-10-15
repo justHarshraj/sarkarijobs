@@ -45,9 +45,10 @@ export default async function CategoryPage({ params }: Props) {
       .sort({ createdAt: -1 })
       .lean();
     jobs = JSON.parse(JSON.stringify(jobsDocs)) as IJob[];
-  } catch (err) {
-    console.error('[CategoryPage] DB error:', err);
+  } catch {
+    console.error('[CategoryPage] DB query failed safely');
   }
+
 
 
   return (

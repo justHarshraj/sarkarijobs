@@ -10,6 +10,7 @@ import AdmitCardsResults from '@/components/sections/AdmitCardsResults';
 import ScrollReveal from '@/components/common/ScrollReveal';
 import { Bell, Sparkles, ShieldCheck, ArrowDown, AlertCircle } from 'lucide-react';
 import Link from 'next/link';
+import { sanitizeText } from '@/lib/utils/sanitizer';
 
 export default async function HomePage() {
   await connection();
@@ -78,14 +79,15 @@ export default async function HomePage() {
     if (totalActiveJobs === 0 && process.env.NEXT_PHASE !== 'phase-production-build') {
       import('@/lib/scraper/scheduler').then(({ triggerScrape }) => {
         triggerScrape('empty-db-initialization', 15).catch((err) =>
-          console.error('[HomePage] Background startup scrape notice:', err)
+          console.error('[HomePage] Background startup scrape notice:', sanitizeText(err))
         );
       });
     }
   } catch (dbErr) {
     isDbConnected = false;
-    console.error('[HomePage] Database query fallback (rendering safe UI):', dbErr);
+    console.error('[HomePage] Database query fallback (rendering safe UI):', sanitizeText(dbErr));
   }
+
 
   const stats: DashboardStats = {
     totalActiveJobs,
@@ -110,17 +112,18 @@ export default async function HomePage() {
 
   return (
     <div className="max-w-7xl mx-auto px-3.5 sm:px-6 lg:px-8 py-4 sm:py-6">
-      {!isDbConnected && (
+      {!isDbConnected && process.env.NODE_ENV === 'development' && (
         <div className="mb-6 p-4 rounded-2xl bg-amber-50 border border-amber-200 text-amber-900 text-xs sm:text-sm flex items-start gap-3 shadow-2xs">
           <AlertCircle className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
           <div className="space-y-1">
-            <p className="font-bold">Database Setup Notice</p>
+            <p className="font-bold">Development Mode Notice</p>
             <p className="text-amber-800 text-xs leading-relaxed">
-              If deploying on Vercel, please ensure <code className="bg-amber-100 px-1.5 py-0.5 rounded font-mono font-bold">MONGODB_URI</code> is added in <strong>Vercel Dashboard &rarr; Project Settings &rarr; Environment Variables</strong>, and your MongoDB Atlas has Network Access set to <code className="bg-amber-100 px-1.5 py-0.5 rounded font-mono font-bold">0.0.0.0/0</code> (Allow Access from Anywhere).
+              Database connection is currently establishing. Check your local database connection.
             </p>
           </div>
         </div>
       )}
+
 
       {/* Hero Banner with Smooth Floating Accents */}
       <section className="relative overflow-hidden rounded-3xl bg-gradient-to-r from-blue-950 via-indigo-950 to-slate-900 text-white p-6 sm:p-10 shadow-xl mb-6 animate-fade-in border border-blue-900/40">

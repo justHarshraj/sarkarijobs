@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { connectDB } from '@/lib/db/connect';
 import Job from '@/lib/db/models/Job';
 import type { ApiResponse, DashboardStats } from '@/types';
+import { getSafeErrorMessage } from '@/lib/utils/sanitizer';
 
 export async function GET() {
   try {
@@ -49,10 +50,10 @@ export async function GET() {
 
     return NextResponse.json(response);
   } catch (err: unknown) {
-    const message = err instanceof Error ? err.message : 'Failed to fetch dashboard stats';
     return NextResponse.json(
-      { success: false, error: message },
+      { success: false, error: getSafeErrorMessage(err, 'Failed to fetch dashboard stats') },
       { status: 500 }
     );
   }
 }
+
