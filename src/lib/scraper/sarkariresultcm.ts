@@ -1,9 +1,9 @@
 // ============================================================
 // Scraper for sarkariresult.com.cm
-// High-performance with persistent HTTP keep-alive & parallel listings
+// High-performance with socket reuse, deep link harvest & auto-retry
 // ============================================================
 
-import axios from 'axios';
+import axios, { AxiosError } from 'axios';
 import http from 'http';
 import https from 'https';
 import * as cheerio from 'cheerio';
@@ -14,7 +14,12 @@ import { parseSarkariDetailPage } from './parser';
 
 const BASE_URL = 'https://sarkariresult.com.cm';
 
-const LISTING_PATHS: { path: string; postType: PostType }[] = [
+export interface ListingScrapeOptions {
+  category?: PostType | 'all';
+  yearFilter?: number;
+}
+
+const ALL_LISTING_PATHS: { path: string; postType: PostType }[] = [
   { path: '/latest-jobs/', postType: 'Latest Job' },
   { path: '/admit-card/', postType: 'Admit Card' },
   { path: '/result/', postType: 'Result' },
@@ -34,15 +39,17 @@ const EXCLUDED_SLUGS = [
   '/about-us/',
 ];
 
-// Persistent HTTP client with connection pooling and socket reuse
+// Persistent HTTP client with enlarged connection pool & socket reuse
 const httpClient = axios.create({
-  timeout: 12000,
-  httpAgent: new http.Agent({ keepAlive: true, maxSockets: 15, keepAliveMsecs: 30000 }),
-  httpsAgent: new https.Agent({ keepAlive: true, maxSockets: 15, keepAliveMsecs: 30000 }),
+  timeout: 15000,
+  httpAgent: new http.Agent({ keepAlive: true, maxSockets: 60, keepAliveMsecs: 60000 }),
+  httpsAgent: new https.Agent({ keepAlive: true, maxSockets: 60, keepAliveMsecs: 60000 }),
   headers: {
-    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+    Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
     'Accept-Language': 'en-US,en;q=0.9,hi;q=0.8',
     'Accept-Encoding': 'gzip, deflate, br',
+    'Cache-Control': 'no-cache',
+    Pragma: 'no-cache',
   },
 });
 
@@ -51,26 +58,48 @@ httpClient.interceptors.request.use((config) => {
   return config;
 });
 
+async function getWithRetry(url: string, retries = 2): Promise<string> {
+  let attempt = 0;
+  while (true) {
+    try {
+      const response = await httpClient.get<string>(url);
+      return response.data;
+    } catch (err: unknown) {
+      attempt++;
+      if (attempt > retries) throw err;
+      const delay = attempt * 800 + Math.random() * 400;
+      await new Promise((resolve) => setTimeout(resolve, delay));
+    }
+  }
+}
+
 /**
- * Scrapes listing pages from sarkariresult.com.cm in parallel
+ * Scrapes listing pages from sarkariresult.com.cm supporting deep pools
  */
-export async function scrapeSarkariResultCmListings(maxItemsPerCategory = 25): Promise<ScrapedJobListing[]> {
+export async function scrapeSarkariResultCmListings(
+  maxItems = 100,
+  options: ListingScrapeOptions = {}
+): Promise<ScrapedJobListing[]> {
   const listings: ScrapedJobListing[] = [];
   const visitedUrls = new Set<string>();
 
-  console.log(`[sarkariresult.com.cm] Fetching ${LISTING_PATHS.length} listing categories in parallel...`);
+  const targetPaths = options.category && options.category !== 'all'
+    ? ALL_LISTING_PATHS.filter((p) => p.postType === options.category)
+    : ALL_LISTING_PATHS;
 
-  const pagePromises = LISTING_PATHS.map(async ({ path, postType }) => {
+  const pathsToScrape = targetPaths.length > 0 ? targetPaths : ALL_LISTING_PATHS;
+  console.log(
+    `[sarkariresult.com.cm] Harvesting listing pool (target: up to ${maxItems} items across ${pathsToScrape.length} paths)...`
+  );
+
+  const pagePromises = pathsToScrape.map(async ({ path, postType }) => {
     const url = `${BASE_URL}${path}`;
     try {
-      const response = await httpClient.get(url);
-      const $ = cheerio.load(response.data);
+      const html = await getWithRetry(url);
+      const $ = cheerio.load(html);
       const pageListings: ScrapedJobListing[] = [];
-      let count = 0;
 
       $('ul li a, div.entry-content a, article h2 a').each((_, el) => {
-        if (count >= maxItemsPerCategory) return false;
-
         const $a = $(el);
         const title = cleanText($a.text());
         const href = $a.attr('href');
@@ -84,15 +113,27 @@ export async function scrapeSarkariResultCmListings(maxItemsPerCategory = 25): P
           return;
         }
 
-        const isExcluded = EXCLUDED_SLUGS.some((slug) => fullUrl.endsWith(slug) || fullUrl === `${BASE_URL}/`);
+        const isExcluded = EXCLUDED_SLUGS.some(
+          (slug) => fullUrl.endsWith(slug) || fullUrl === `${BASE_URL}/`
+        );
         if (isExcluded || !fullUrl.startsWith(BASE_URL)) return;
+
+        if (options.yearFilter) {
+          const yearStr = String(options.yearFilter);
+          if (!fullUrl.includes(yearStr) && !title.includes(yearStr)) {
+            return;
+          }
+        }
+
+        const dateMatch = title.match(/last\s*date\s*[:\-]\s*(\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4})/i);
+        const lastDate = dateMatch ? dateMatch[1] : undefined;
 
         pageListings.push({
           title,
           url: fullUrl,
           postType,
+          lastDate,
         });
-        count++;
       });
 
       return pageListings;
@@ -110,11 +151,14 @@ export async function scrapeSarkariResultCmListings(maxItemsPerCategory = 25): P
         if (!visitedUrls.has(item.url)) {
           visitedUrls.add(item.url);
           listings.push(item);
+          if (listings.length >= maxItems) break;
         }
       }
     }
+    if (listings.length >= maxItems) break;
   }
 
+  console.log(`[sarkariresult.com.cm] Successfully harvested ${listings.length} candidate listings.`);
   return listings;
 }
 
@@ -123,10 +167,10 @@ export async function scrapeSarkariResultCmListings(maxItemsPerCategory = 25): P
  */
 export async function scrapeSarkariResultCmDetail(pageUrl: string): Promise<ScrapedJobDetail | null> {
   try {
-    const response = await httpClient.get(pageUrl);
-    return parseSarkariDetailPage(response.data, pageUrl);
+    const html = await getWithRetry(pageUrl, 2);
+    return parseSarkariDetailPage(html, pageUrl);
   } catch (err: unknown) {
-    const message = err instanceof Error ? err.message : String(err);
+    const message = err instanceof AxiosError ? `${err.code || err.message}` : String(err);
     console.error(`[sarkariresult.com.cm] Error scraping detail page ${pageUrl}:`, message);
     return null;
   }

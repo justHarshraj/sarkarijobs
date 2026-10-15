@@ -1,13 +1,13 @@
 // ============================================================
-// Scraper Orchestrator — High Performance & Efficient
-// Coordinates extraction, batch pre-filtering, concurrency pooling,
-// deduplication, and persistence into MongoDB.
+// Scraper Orchestrator — High Performance, Low Latency & Efficient
+// Features: In-memory differential filtering, chunked batching,
+// memory-efficient Cheerio parsing, and MongoDB bulkWrite persistence.
 // ============================================================
 
 import { connectDB } from '@/lib/db/connect';
 import Job from '@/lib/db/models/Job';
 import type { Types } from 'mongoose';
-import type { IJob, ScrapedJobListing, ScrapedJobDetail } from '@/types';
+import type { IJob, ScrapedJobListing, ScrapedJobDetail, PostType } from '@/types';
 import { scrapeSarkariResultListings, scrapeSarkariResultDetail } from './sarkariresult';
 import { scrapeSarkariResultCmListings, scrapeSarkariResultCmDetail } from './sarkariresultcm';
 import {
@@ -23,7 +23,6 @@ import {
 import { parseIndianDate } from '@/lib/utils/dateParser';
 import { generateJobSlug } from '@/lib/utils/slugify';
 import { generateContentHash, isDuplicateJob } from '@/lib/utils/deduplicator';
-import { sleep, getRandomDelay } from '@/lib/utils/userAgents';
 import { asyncPool } from '@/lib/utils/asyncPool';
 
 export interface ScraperRunResult {
@@ -34,6 +33,17 @@ export interface ScraperRunResult {
   skipped: number;
   errors: number;
   durationMs: number;
+  itemsPerSecond?: number;
+}
+
+export interface RunScraperOptions {
+  maxItems?: number;
+  concurrency?: number;
+  chunkSize?: number;
+  forceRefresh?: boolean;
+  category?: PostType | 'all';
+  yearFilter?: number;
+  onProgress?: (processed: number, total: number, stats: ScraperRunResult) => void;
 }
 
 /**
@@ -50,7 +60,7 @@ function normalizeScrapedJob(
   const category = normalizeCategory(title, organization);
   const state = normalizeState(`${title} ${organization} ${detail.shortDescription}`);
 
-  // Parse total vacancies: either sum from breakdown or parsed from text
+  // Parse total vacancies
   let totalVacancies = 0;
   if (detail.vacancyDetails && detail.vacancyDetails.length > 0) {
     totalVacancies = detail.vacancyDetails.reduce((acc, curr) => acc + (curr.count || 0), 0);
@@ -59,11 +69,13 @@ function normalizeScrapedJob(
     totalVacancies = normalizeVacancies(title) || normalizeVacancies(detail.shortDescription);
   }
 
-  // Parse qualifications from vacancy details eligibility
+  // Parse qualifications from vacancy details
   const eligibilityCombined = detail.vacancyDetails
     .map((v) => v.eligibility)
     .join(' ');
-  const qualification = normalizeQualification(`${eligibilityCombined} ${title} ${detail.shortDescription}`);
+  const qualification = normalizeQualification(
+    `${eligibilityCombined} ${title} ${detail.shortDescription}`
+  );
 
   // Parse dates
   const startDate = detail.importantDates['applicationStartDate']
@@ -71,6 +83,8 @@ function normalizeScrapedJob(
     : null;
   const endDate = detail.importantDates['applicationEndDate']
     ? parseIndianDate(detail.importantDates['applicationEndDate'])
+    : listing.lastDate
+    ? parseIndianDate(listing.lastDate)
     : null;
   const feeDate = detail.importantDates['feePaymentLastDate']
     ? parseIndianDate(detail.importantDates['feePaymentLastDate'])
@@ -78,7 +92,7 @@ function normalizeScrapedJob(
 
   // Parse fees
   const feeGeneral = normalizeFee(detail.applicationFee['general'] || '');
-  const feeOBC = normalizeFee(detail.applicationFee['general'] || '');
+  const feeOBC = normalizeFee(detail.applicationFee['obc'] || detail.applicationFee['general'] || '');
   const feeSCST = normalizeFee(detail.applicationFee['scst'] || '');
   const feeFemale = normalizeFee(detail.applicationFee['female'] || '');
   const feePH = normalizeFee(detail.applicationFee['ph'] || '');
@@ -145,20 +159,37 @@ function normalizeScrapedJob(
 }
 
 /**
- * Runs the scraper for a specific source with batch pre-filtering and controlled concurrency
+ * Runs the scraper for a specific source with chunked batching & MongoDB bulkWrite
  */
 export async function runScraperForSource(
   source: 'sarkariresult.com' | 'sarkariresult.com.cm',
-  maxItems = 30
+  maxItemsOrOptions: number | RunScraperOptions = 30
 ): Promise<ScraperRunResult> {
+  const options: RunScraperOptions =
+    typeof maxItemsOrOptions === 'number'
+      ? { maxItems: maxItemsOrOptions }
+      : maxItemsOrOptions;
+
+  const maxItems = options.maxItems || 30;
+  const concurrency = options.concurrency || 10;
+  const chunkSize = options.chunkSize || 30;
+  const forceRefresh = options.forceRefresh || false;
+
   const startTime = Date.now();
   await connectDB();
 
+  // 1. Harvest listings from target source
   let listings: ScrapedJobListing[] = [];
   if (source === 'sarkariresult.com') {
-    listings = await scrapeSarkariResultListings(maxItems);
+    listings = await scrapeSarkariResultListings(maxItems, {
+      category: options.category,
+      yearFilter: options.yearFilter,
+    });
   } else {
-    listings = await scrapeSarkariResultCmListings(maxItems);
+    listings = await scrapeSarkariResultCmListings(maxItems, {
+      category: options.category,
+      yearFilter: options.yearFilter,
+    });
   }
 
   // Deduplicate listings by URL
@@ -177,6 +208,7 @@ export async function runScraperForSource(
     skipped: 0,
     errors: 0,
     durationMs: 0,
+    itemsPerSecond: 0,
   };
 
   if (uniqueListings.length === 0) {
@@ -184,11 +216,11 @@ export async function runScraperForSource(
     return result;
   }
 
-  // 1. Batch Query: Find existing jobs in MongoDB with a single query
+  // 2. High-speed O(1) In-Memory Differential Filtering
   const listingUrls = uniqueListings.map((l) => l.url);
   const existingJobs = await Job.find(
     { sourceUrl: { $in: listingUrls } },
-    'sourceUrl scrapedAt slug sourceHash'
+    '_id sourceUrl scrapedAt slug sourceHash applicationEndDate title'
   ).lean();
 
   interface ExistingJobRecord {
@@ -197,6 +229,8 @@ export async function runScraperForSource(
     scrapedAt: Date;
     slug: string;
     sourceHash?: string;
+    applicationEndDate?: Date | null;
+    title?: string;
   }
 
   const existingMap = new Map<string, ExistingJobRecord>();
@@ -204,132 +238,237 @@ export async function runScraperForSource(
     existingMap.set(job.sourceUrl, job as unknown as ExistingJobRecord);
   }
 
-  // 2. Pre-filter: Separate fresh jobs (<24 hours) from jobs that need scraping
-  const oneDayMs = 24 * 60 * 60 * 1000;
   const now = Date.now();
+  const freshTtlMs = 48 * 60 * 60 * 1000; // 48 hours freshness window
   const toProcess: ScrapedJobListing[] = [];
 
   for (const item of uniqueListings) {
     const existing = existingMap.get(item.url);
-    if (existing && existing.scrapedAt) {
-      const lastScrapedTime = new Date(existing.scrapedAt).getTime();
-      if (now - lastScrapedTime < oneDayMs) {
-        result.skipped++;
-        continue;
+
+    if (existing && !forceRefresh) {
+      // If job is already expired (deadline passed), permanently skip re-scraping
+      if (existing.applicationEndDate) {
+        const endTimestamp = new Date(existing.applicationEndDate).getTime();
+        if (endTimestamp < now) {
+          result.skipped++;
+          continue;
+        }
+      }
+
+      // If scraped recently within TTL, skip
+      if (existing.scrapedAt) {
+        const lastScrapedTime = new Date(existing.scrapedAt).getTime();
+        if (now - lastScrapedTime < freshTtlMs) {
+          result.skipped++;
+          continue;
+        }
       }
     }
+
     toProcess.push(item);
   }
 
   console.log(
-    `[Scraper Orchestrator] ${source}: ${uniqueListings.length} total, ${result.skipped} fresh (skipped), ${toProcess.length} to process.`
+    `[Scraper] ${source}: ${uniqueListings.length} total links | ${result.skipped} skipped (expired/fresh) | ${toProcess.length} to process.`
   );
 
-  // 3. Process remaining jobs with controlled concurrency (4 workers)
-  if (toProcess.length > 0) {
-    const CONCURRENCY_LIMIT = 4;
-    await asyncPool(CONCURRENCY_LIMIT, toProcess, async (item) => {
-      try {
-        // Fetch detail page using keep-alive client
-        let detail: ScrapedJobDetail | null = null;
-        if (source === 'sarkariresult.com') {
-          detail = await scrapeSarkariResultDetail(item.url);
-        } else {
-          detail = await scrapeSarkariResultCmDetail(item.url);
-        }
-
-        if (!detail || !detail.title) {
-          result.errors++;
-          return;
-        }
-
-        // Normalize
-        const normalized = normalizeScrapedJob(detail, item, source);
-        const existingJob = existingMap.get(item.url);
-
-        // Deduplication check across sources (only for new jobs)
-        if (!existingJob) {
-          const candidate = await Job.findOne({
-            state: normalized.state,
-            category: normalized.category,
-          })
-            .select('title organization totalVacancies sourceUrl')
-            .lean();
-
-          if (
-            candidate &&
-            isDuplicateJob(
-              {
-                title: normalized.title || '',
-                organization: normalized.organization,
-                totalVacancies: normalized.totalVacancies,
-              },
-              {
-                title: candidate.title,
-                organization: candidate.organization,
-                totalVacancies: candidate.totalVacancies,
-              }
-            )
-          ) {
-            console.log(`[Deduplicator] Cross-source duplicate detected: "${normalized.title}". Skipping.`);
-            result.skipped++;
-            return;
-          }
-        }
-
-        // Upsert into MongoDB
-        if (existingJob) {
-          await Job.updateOne(
-            { _id: existingJob._id },
-            {
-              $set: {
-                ...normalized,
-                slug: existingJob.slug,
-                lastUpdated: new Date(),
-              },
-            }
-          );
-          result.updatedJobs++;
-        } else {
-          let slug = normalized.slug!;
-          const slugExists = await Job.findOne({ slug }).select('_id').lean();
-          if (slugExists) {
-            slug = `${slug}-${Date.now().toString().slice(-4)}`;
-            normalized.slug = slug;
-          }
-
-          await Job.create(normalized);
-          result.newJobs++;
-        }
-
-        // Polite micro-jitter delay per worker (150-350ms)
-        await sleep(getRandomDelay(150, 350));
-      } catch (err: unknown) {
-        result.errors++;
-        const message = err instanceof Error ? err.message : String(err);
-        console.error(`[Scraper Orchestrator] Error processing ${item.url}:`, message);
-      }
-    });
+  if (toProcess.length === 0) {
+    result.durationMs = Date.now() - startTime;
+    result.itemsPerSecond = 0;
+    return result;
   }
 
-  // Update status flags
+  // 3. Pre-load candidate active jobs into memory for O(1) slug & duplicate check
+  // Eliminates N+1 database queries entirely!
+  const [existingSlugsList, activeCandidates] = await Promise.all([
+    Job.find({}, 'slug').lean(),
+    Job.find({ isActive: true }, 'title organization totalVacancies').lean(),
+  ]);
+
+  const existingSlugs = new Set<string>(existingSlugsList.map((j) => j.slug));
+  const activeCandidateList = [...activeCandidates];
+
+  // Helper for generating collision-free slug in 0ms without hitting the DB
+  const getUniqueSlug = (baseSlug: string): string => {
+    let slug = baseSlug;
+    let counter = 1;
+    while (existingSlugs.has(slug)) {
+      slug = `${baseSlug}-${Date.now().toString().slice(-4)}${counter > 1 ? `-${counter}` : ''}`;
+      counter++;
+    }
+    existingSlugs.add(slug);
+    return slug;
+  };
+
+  // 4. Chunked Batch Pipeline with Adaptive Concurrency & MongoDB bulkWrite
+  const totalChunks = Math.ceil(toProcess.length / chunkSize);
+  let processedSoFar = 0;
+
+  for (let c = 0; c < totalChunks; c++) {
+    const chunkStart = c * chunkSize;
+    const chunkItems = toProcess.slice(chunkStart, chunkStart + chunkSize);
+
+    // Concurrently fetch detail pages for this chunk
+    interface ProcessedItem {
+      normalized: Partial<IJob>;
+      existing: ExistingJobRecord | undefined;
+    }
+
+    const processedResults = await asyncPool(
+      concurrency,
+      chunkItems,
+      async (item) => {
+        try {
+          let detail: ScrapedJobDetail | null = null;
+          if (source === 'sarkariresult.com') {
+            detail = await scrapeSarkariResultDetail(item.url);
+          } else {
+            detail = await scrapeSarkariResultCmDetail(item.url);
+          }
+
+          if (!detail || !detail.title) {
+            result.errors++;
+            return null;
+          }
+
+          const normalized = normalizeScrapedJob(detail, item, source);
+          const existingJob = existingMap.get(item.url);
+
+          // In-memory cross-source deduplication check (only for new jobs)
+          if (!existingJob) {
+            const isDup = activeCandidateList.some((candidate) =>
+              isDuplicateJob(
+                {
+                  title: normalized.title || '',
+                  organization: normalized.organization,
+                  totalVacancies: normalized.totalVacancies,
+                },
+                {
+                  title: candidate.title,
+                  organization: candidate.organization,
+                  totalVacancies: candidate.totalVacancies,
+                }
+              )
+            );
+
+            if (isDup) {
+              result.skipped++;
+              return null;
+            }
+          }
+
+          return {
+            normalized,
+            existing: existingJob,
+          } as ProcessedItem;
+        } catch (err: unknown) {
+          result.errors++;
+          const message = err instanceof Error ? err.message : String(err);
+          console.warn(`[Scraper] Detail fetch error on ${item.url}:`, message);
+          return null;
+        }
+      },
+      { retries: 2, taskDelayMs: 20 }
+    );
+
+    // 5. Construct atomic MongoDB bulkWrite operations for this chunk
+    type BulkOperation = Parameters<typeof Job.bulkWrite>[0][number];
+    const bulkOps: BulkOperation[] = [];
+    const validItems = processedResults.filter((p): p is ProcessedItem => p !== null);
+
+    for (const { normalized, existing } of validItems) {
+      if (existing) {
+        bulkOps.push({
+          updateOne: {
+            filter: { _id: existing._id },
+            update: {
+              $set: {
+                ...normalized,
+                slug: existing.slug,
+                lastUpdated: new Date(),
+              },
+            },
+          },
+        });
+        result.updatedJobs++;
+      } else {
+        const uniqueSlug = getUniqueSlug(normalized.slug!);
+        normalized.slug = uniqueSlug;
+
+        bulkOps.push({
+          insertOne: {
+            document: normalized,
+          },
+        });
+        result.newJobs++;
+
+        // Append to local candidates list for subsequent checks in this run
+        activeCandidateList.push({
+          title: normalized.title || '',
+          organization: normalized.organization || '',
+          totalVacancies: normalized.totalVacancies || 0,
+        } as (typeof activeCandidates)[number]);
+      }
+    }
+
+    // Execute bulk write in 1 roundtrip
+    if (bulkOps.length > 0) {
+      await Job.bulkWrite(bulkOps, { ordered: false });
+    }
+
+    processedSoFar += chunkItems.length;
+    const elapsedSec = (Date.now() - startTime) / 1000;
+    const currentRate = (processedSoFar / Math.max(1, elapsedSec)).toFixed(1);
+
+    console.log(
+      `[Scraper] Chunk ${c + 1}/${totalChunks}: ${processedSoFar}/${toProcess.length} items (${(
+        (processedSoFar / toProcess.length) *
+        100
+      ).toFixed(0)}%) | Rate: ${currentRate} items/s`
+    );
+
+    if (options.onProgress) {
+      options.onProgress(processedSoFar, toProcess.length, result);
+    }
+  }
+
+  // 6. Fast single-sweep status flag update
   await updateJobStatusFlags();
 
   result.durationMs = Date.now() - startTime;
-  console.log(`[Scraper Orchestrator] Completed ${source} in ${(result.durationMs / 1000).toFixed(2)}s:`, result);
+  result.itemsPerSecond = parseFloat((toProcess.length / (result.durationMs / 1000)).toFixed(2));
+
+  console.log(
+    `[Scraper] ✅ Completed ${source} in ${(result.durationMs / 1000).toFixed(2)}s (${result.itemsPerSecond} items/s):`,
+    {
+      newJobs: result.newJobs,
+      updatedJobs: result.updatedJobs,
+      skipped: result.skipped,
+      errors: result.errors,
+    }
+  );
+
   return result;
 }
 
 /**
- * Runs all scrapers concurrently
+ * Runs all scrapers concurrently with batch pipeline
  */
-export async function runAllScrapers(maxItems = 25): Promise<ScraperRunResult[]> {
+export async function runAllScrapers(
+  maxItemsOrOptions: number | RunScraperOptions = 50
+): Promise<ScraperRunResult[]> {
+  const options: RunScraperOptions =
+    typeof maxItemsOrOptions === 'number'
+      ? { maxItems: maxItemsOrOptions }
+      : maxItemsOrOptions;
+
+  const maxItems = options.maxItems || 50;
   console.log(`[Scraper Orchestrator] Running all scrapers concurrently (maxItems=${maxItems})...`);
   const startTime = Date.now();
 
   const settled = await Promise.allSettled([
-    runScraperForSource('sarkariresult.com', maxItems),
-    runScraperForSource('sarkariresult.com.cm', maxItems),
+    runScraperForSource('sarkariresult.com', options),
+    runScraperForSource('sarkariresult.com.cm', options),
   ]);
 
   const results: ScraperRunResult[] = [];
@@ -341,11 +480,11 @@ export async function runAllScrapers(maxItems = 25): Promise<ScraperRunResult[]>
     }
   }
 
-  // Single sweep to update overall flags after all sources complete
+  // Single sweep to update overall flags
   await updateJobStatusFlags();
 
   const totalTime = ((Date.now() - startTime) / 1000).toFixed(2);
-  console.log(`[Scraper Orchestrator] All scrapers completed in ${totalTime}s.`);
+  console.log(`[Scraper Orchestrator] All scrapers finished in ${totalTime}s.`);
   return results;
 }
 
@@ -357,7 +496,7 @@ export async function updateJobStatusFlags(): Promise<void> {
   const now = new Date();
   const sevenDaysFromNow = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
 
-  // Mark expired jobs as inactive
+  // Mark expired jobs as inactive in 1 query
   await Job.updateMany(
     { applicationEndDate: { $lt: now }, isActive: true },
     { $set: { isActive: false, isEndingSoon: false } }
