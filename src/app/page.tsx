@@ -78,7 +78,7 @@ export default async function HomePage() {
     // If 0 active jobs on initialization, trigger background scrape asynchronously (non-blocking)
     if (totalActiveJobs === 0 && process.env.NEXT_PHASE !== 'phase-production-build') {
       import('@/lib/scraper/scheduler').then(({ triggerScrape }) => {
-        triggerScrape('empty-db-initialization', 15).catch((err) =>
+        triggerScrape('empty-db-initialization', 150).catch((err) =>
           console.error('[HomePage] Background startup scrape notice:', sanitizeText(err))
         );
       });

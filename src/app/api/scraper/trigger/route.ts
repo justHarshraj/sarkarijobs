@@ -4,17 +4,29 @@ import { getScraperStatus } from '@/lib/scraper/scheduler';
 import { getSafeErrorMessage } from '@/lib/utils/sanitizer';
 import type { PostType } from '@/types';
 
-export async function GET() {
-  return NextResponse.json({
-    success: true,
-    status: getScraperStatus(),
-  });
+export async function GET(req: NextRequest) {
+  const { searchParams } = new URL(req.url);
+  const shouldRun =
+    searchParams.get('run') === 'true' ||
+    Boolean(req.headers.get('x-vercel-cron')) ||
+    req.headers.get('user-agent')?.includes('vercel-cron');
+
+  if (!shouldRun) {
+    return NextResponse.json({
+      success: true,
+      status: getScraperStatus(),
+      tip: 'Pass ?run=true to trigger a scraping run via GET',
+    });
+  }
+
+  // If run requested, delegate to scraper
+  return POST(req);
 }
 
 export async function POST(req: NextRequest) {
   try {
     let source = 'all';
-    let limit = 20;
+    let limit = 100;
     let concurrency = 10;
     let forceRefresh = false;
     let category: PostType | 'all' | undefined = undefined;

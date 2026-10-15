@@ -1,0 +1,8 @@
+{
+  "crons": [
+    {
+      "path": "/api/scraper/trigger?run=true&limit=150",
+      "schedule": "0 */6 * * *"
+    }
+  ]
+}
