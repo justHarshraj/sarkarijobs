@@ -7,15 +7,27 @@ import type { IJob } from '@/types';
 import JobCard from '@/components/jobs/JobCard';
 import { Search, ArrowLeft, ChevronRight, FileQuestion } from 'lucide-react';
 
+import { getBaseUrl, generateBreadcrumbSchema } from '@/lib/seo/schema';
+import JsonLd from '@/components/common/JsonLd';
+
 interface Props {
   searchParams: Promise<{ q?: string }>;
 }
 
 export async function generateMetadata({ searchParams }: Props): Promise<Metadata> {
+  const baseUrl = getBaseUrl();
   const { q } = await searchParams;
+  const cleanQ = q?.trim();
+
   return {
-    title: q ? `Search Results for "${q}" | Sarkari Jobs` : 'Search Government Jobs | Sarkari Jobs',
-    description: `Search results for government job recruitments matching ${q || 'latest notifications'}.`,
+    title: cleanQ ? `Search Results for "${cleanQ}" | Sarkari Jobs` : 'Search Government Jobs | Sarkari Jobs',
+    description: `Search results for government job recruitments matching ${cleanQ || 'latest notifications'}. Apply online for central and state vacancies.`,
+    alternates: {
+      canonical: `${baseUrl}/search`,
+    },
+    robots: cleanQ
+      ? { index: false, follow: true }
+      : { index: true, follow: true },
   };
 }
 
@@ -50,8 +62,15 @@ export default async function SearchPage({ searchParams }: Props) {
 
 
 
+  const breadcrumbSchema = generateBreadcrumbSchema([
+    { name: 'Home', url: '/' },
+    { name: 'Search', url: '/search' },
+  ]);
+
   return (
-    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+    <>
+      <JsonLd data={breadcrumbSchema} />
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
       {/* Breadcrumb */}
       <nav aria-label="Breadcrumb" className="flex items-center gap-1.5 text-xs text-slate-500 mb-6">
         <Link href="/" className="hover:text-blue-600 flex items-center gap-1 font-medium">
@@ -129,5 +148,6 @@ export default async function SearchPage({ searchParams }: Props) {
         </div>
       )}
     </div>
-  );
+  </>
+);
 }

@@ -11,6 +11,9 @@ import ScrollReveal from '@/components/common/ScrollReveal';
 import { Bell, Sparkles, ShieldCheck, ArrowDown, AlertCircle } from 'lucide-react';
 import Link from 'next/link';
 import { sanitizeText } from '@/lib/utils/sanitizer';
+import SeoDirectory, { HOME_FAQS } from '@/components/sections/SeoDirectory';
+import JsonLd from '@/components/common/JsonLd';
+import { generateFAQSchema } from '@/lib/seo/schema';
 
 export default async function HomePage() {
   await connection();
@@ -188,6 +191,12 @@ export default async function HomePage() {
       {/* Main Filterable Jobs Explorer */}
       <ScrollReveal delayMs={300}>
         <JobExplorer initialJobs={latestJobs} initialTotal={totalActiveJobs} />
+      </ScrollReveal>
+
+      {/* SEO Knowledge Base & Trending Search Matrix */}
+      <JsonLd data={generateFAQSchema(HOME_FAQS)} />
+      <ScrollReveal delayMs={350}>
+        <SeoDirectory />
       </ScrollReveal>
     </div>
   );

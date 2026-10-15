@@ -1,14 +1,14 @@
 import React from 'react';
 import Link from 'next/link';
-import { Briefcase, ShieldCheck, Heart } from 'lucide-react';
+import { Briefcase, ShieldCheck, Heart, Rss } from 'lucide-react';
 
 export default function Footer() {
   return (
     <footer className="bg-slate-900 text-slate-300 mt-auto border-t border-slate-800">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-8">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-8">
           {/* Brand Info */}
-          <div className="space-y-4">
+          <div className="space-y-4 lg:col-span-1">
             <div className="flex items-center gap-2">
               <div className="w-8 h-8 rounded-lg bg-blue-600 flex items-center justify-center text-white">
                 <Briefcase className="w-4 h-4 text-amber-300" />
@@ -21,8 +21,20 @@ export default function Footer() {
               India&apos;s automated aggregator for central & state government recruitments, exam results, admit cards, and official notification PDFs.
             </p>
             <div className="flex items-center gap-1.5 text-xs text-emerald-400 font-medium">
-              <ShieldCheck className="w-4 h-4" />
-              <span>Verified Government Links & Documents</span>
+              <ShieldCheck className="w-4 h-4 shrink-0" />
+              <span>100% Verified Govt Sources</span>
+            </div>
+            <div>
+              <Link
+                href="/feed.xml"
+                className="inline-flex items-center gap-1.5 text-xs text-amber-400 hover:text-amber-300 font-medium transition-colors"
+                target="_blank"
+                rel="alternate"
+                type="application/rss+xml"
+              >
+                <Rss className="w-3.5 h-3.5" />
+                <span>RSS Feed (Fast Updates)</span>
+              </Link>
             </div>
           </div>
 
@@ -52,6 +64,11 @@ export default function Footer() {
                   Exam Results & Cutoffs
                 </Link>
               </li>
+              <li>
+                <Link href="/sitemap.xml" className="hover:text-white transition-colors">
+                  XML Sitemap
+                </Link>
+              </li>
             </ul>
           </div>
 
@@ -73,7 +90,7 @@ export default function Footer() {
               </li>
               <li>
                 <Link href="/category/upsc" className="hover:text-white transition-colors">
-                  Union Public Service Commission (UPSC)
+                  Union Public Service (UPSC)
                 </Link>
               </li>
               <li>
@@ -84,6 +101,50 @@ export default function Footer() {
               <li>
                 <Link href="/category/defence" className="hover:text-white transition-colors">
                   Defence & Paramilitary (Agniveer)
+                </Link>
+              </li>
+              <li>
+                <Link href="/category/police" className="hover:text-white transition-colors">
+                  Police Constable & Sub-Inspector
+                </Link>
+              </li>
+            </ul>
+          </div>
+
+          {/* Qualification Jobs */}
+          <div>
+            <h4 className="text-sm font-semibold text-white uppercase tracking-wider mb-4">
+              Qualifications
+            </h4>
+            <ul className="space-y-2 text-xs">
+              <li>
+                <Link href="/search?q=10th" className="hover:text-white transition-colors">
+                  10th Pass Govt Jobs
+                </Link>
+              </li>
+              <li>
+                <Link href="/search?q=12th" className="hover:text-white transition-colors">
+                  12th Pass Sarkari Naukri
+                </Link>
+              </li>
+              <li>
+                <Link href="/search?q=ITI" className="hover:text-white transition-colors">
+                  ITI Trade Apprentice
+                </Link>
+              </li>
+              <li>
+                <Link href="/search?q=Graduate" className="hover:text-white transition-colors">
+                  Graduate Recruitment
+                </Link>
+              </li>
+              <li>
+                <Link href="/category/engineering" className="hover:text-white transition-colors">
+                  Engineering / GATE / PSU
+                </Link>
+              </li>
+              <li>
+                <Link href="/category/teaching" className="hover:text-white transition-colors">
+                  Teaching & TET Exams
                 </Link>
               </li>
             </ul>
