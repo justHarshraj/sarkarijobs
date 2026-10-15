@@ -39,14 +39,12 @@ export function getSafeErrorMessage(
   err: unknown,
   fallback = 'An unexpected error occurred. Please try again later.'
 ): string {
-  // In production, always return safe generic message
-  if (process.env.NODE_ENV === 'production') {
-    return fallback;
-  }
-
-  // In development, return sanitized message without credentials
   if (err instanceof Error) {
     return sanitizeText(err.message) || fallback;
+  }
+
+  if (typeof err === 'string') {
+    return sanitizeText(err) || fallback;
   }
 
   return fallback;

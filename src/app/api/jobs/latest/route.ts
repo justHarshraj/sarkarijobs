@@ -4,6 +4,8 @@ import Job from '@/lib/db/models/Job';
 import type { ApiResponse, IJob } from '@/types';
 import { getSafeErrorMessage } from '@/lib/utils/sanitizer';
 
+export const dynamic = 'force-dynamic';
+
 export async function GET(req: NextRequest) {
   try {
     await connectDB();

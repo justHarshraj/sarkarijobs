@@ -5,6 +5,8 @@ import { CATEGORIES } from '@/lib/constants/categories';
 import type { ApiResponse } from '@/types';
 import { getSafeErrorMessage } from '@/lib/utils/sanitizer';
 
+export const dynamic = 'force-dynamic';
+
 export async function GET() {
   try {
     await connectDB();
