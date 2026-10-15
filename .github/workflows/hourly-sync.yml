@@ -1,0 +1,27 @@
+name: Hourly Bulk Scraper Sync
+
+on:
+  schedule:
+    # Runs at the start of every hour (0 * * * *)
+    - cron: '0 * * * *'
+  # Allows manual 1-click trigger from GitHub Actions tab
+  workflow_dispatch:
+
+jobs:
+  hourly-scrape:
+    name: Sync Sarkari Jobs Pool
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Trigger Bulk Scraper API
+        run: |
+          echo "Triggering hourly bulk sync on production deployment..."
+          RESPONSE=$(curl -s -w "\nHTTP_STATUS:%{http_code}" -X GET "https://sarkarijobs-eta.vercel.app/api/scraper/trigger?run=true&limit=300")
+          echo "$RESPONSE"
+          HTTP_CODE=$(echo "$RESPONSE" | grep "HTTP_STATUS" | cut -d':' -f2)
+          if [ "$HTTP_CODE" -ge 200 ] && [ "$HTTP_CODE" -lt 400 ]; then
+            echo "✅ Hourly bulk scrape triggered successfully!"
+          else
+            echo "⚠️ Notice: Endpoint returned status $HTTP_CODE"
+          fi
