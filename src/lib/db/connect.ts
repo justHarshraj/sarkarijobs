@@ -28,26 +28,36 @@ async function connectDB(): Promise<typeof mongoose> {
     return cached.conn;
   }
 
-  if (!cached.promise) {
-    const uri = process.env.MONGODB_URI || 'mongodb://localhost:27017/sarkarijobs';
+  const uri = process.env.MONGODB_URI;
 
+  // On Vercel or production: fail fast immediately if MONGODB_URI is not configured
+  if (!uri && (process.env.VERCEL || process.env.NODE_ENV === 'production')) {
+    const errMsg =
+      'MONGODB_URI environment variable is not configured in Vercel settings. Please add MONGODB_URI in Vercel Dashboard -> Settings -> Environment Variables.';
+    console.error(`❌ [MongoDB] ${errMsg}`);
+    throw new Error(errMsg);
+  }
+
+  const connectionUri = uri || 'mongodb://localhost:27017/sarkarijobs';
+
+  if (!cached.promise) {
     const opts: mongoose.ConnectOptions = {
       bufferCommands: false,
       maxPoolSize: 10,
       minPoolSize: 1,
-      serverSelectionTimeoutMS: 8000,
-      socketTimeoutMS: 45000,
+      serverSelectionTimeoutMS: 3500, // Fast fail in 3.5s so serverless requests do not stall
+      socketTimeoutMS: 30000,
     };
 
     cached.promise = mongoose
-      .connect(uri, opts)
+      .connect(connectionUri, opts)
       .then((mongooseInstance) => {
         console.log('✅ MongoDB connected successfully');
         return mongooseInstance;
       })
       .catch((error) => {
         cached.promise = null;
-        console.error('❌ MongoDB connection error:', error);
+        console.error('❌ MongoDB connection error:', error.message || error);
         throw error;
       });
   }
@@ -64,3 +74,4 @@ async function connectDB(): Promise<typeof mongoose> {
 
 export { connectDB };
 export default connectDB;
+

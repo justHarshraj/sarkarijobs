@@ -28,35 +28,49 @@ interface Props {
 }
 
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
-  await connectDB();
-  const { slug } = await params;
-  const job = await Job.findOne({ slug }).lean();
+  try {
+    await connectDB();
+    const { slug } = await params;
+    const job = await Job.findOne({ slug }).lean();
 
-  if (!job) {
+    if (!job) {
+      return {
+        title: 'Job Not Found | Sarkari Jobs',
+      };
+    }
+
     return {
-      title: 'Job Not Found | Sarkari Jobs',
+      title: job.metaTitle || `${job.title} - Apply Online | Sarkari Jobs`,
+      description:
+        job.metaDescription ||
+        `Apply for ${job.title}. ${job.totalVacancies} vacancies. Last Date: ${
+          job.applicationEndDate ? formatDateIndian(job.applicationEndDate) : 'See Details'
+        }. Download official notification PDF.`,
+    };
+  } catch {
+    return {
+      title: 'Job Details | Sarkari Jobs',
     };
   }
-
-  return {
-    title: job.metaTitle || `${job.title} - Apply Online | Sarkari Jobs`,
-    description:
-      job.metaDescription ||
-      `Apply for ${job.title}. ${job.totalVacancies} vacancies. Last Date: ${
-        job.applicationEndDate ? formatDateIndian(job.applicationEndDate) : 'See Details'
-      }. Download official notification PDF.`,
-  };
 }
 
 export default async function JobDetailPage({ params }: Props) {
   await connection();
-  await connectDB();
   const { slug } = await params;
 
-  const jobDoc = await Job.findOne({ slug }).lean();
+  let jobDoc: unknown = null;
+  try {
+    await connectDB();
+    jobDoc = await Job.findOne({ slug }).lean();
+  } catch (err) {
+    console.error('[JobDetailPage] DB query error:', err);
+    notFound();
+  }
+
   if (!jobDoc) {
     notFound();
   }
+
 
   const job = JSON.parse(JSON.stringify(jobDoc)) as IJob;
   const remainingDays = daysUntil(job.applicationEndDate);

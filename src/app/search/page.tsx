@@ -23,25 +23,31 @@ import { connection } from 'next/server';
 
 export default async function SearchPage({ searchParams }: Props) {
   await connection();
-  await connectDB();
   const { q = '' } = await searchParams;
   const cleanQuery = q.trim();
 
   let jobs: IJob[] = [];
   if (cleanQuery) {
-    const jobsDocs = await Job.find({
-      $or: [
-        { title: { $regex: cleanQuery, $options: 'i' } },
-        { organization: { $regex: cleanQuery, $options: 'i' } },
-        { shortDescription: { $regex: cleanQuery, $options: 'i' } },
-        { category: { $regex: cleanQuery, $options: 'i' } },
-      ],
-    })
-      .sort({ createdAt: -1 })
-      .lean();
+    try {
+      await connectDB();
+      const jobsDocs = await Job.find({
+        $or: [
+          { title: { $regex: cleanQuery, $options: 'i' } },
+          { organization: { $regex: cleanQuery, $options: 'i' } },
+          { shortDescription: { $regex: cleanQuery, $options: 'i' } },
+          { category: { $regex: cleanQuery, $options: 'i' } },
+        ],
+      })
+        .sort({ createdAt: -1 })
+        .limit(30)
+        .lean();
 
-    jobs = JSON.parse(JSON.stringify(jobsDocs)) as IJob[];
+      jobs = JSON.parse(JSON.stringify(jobsDocs)) as IJob[];
+    } catch (err) {
+      console.error('[SearchPage] DB search query error:', err);
+    }
   }
+
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">

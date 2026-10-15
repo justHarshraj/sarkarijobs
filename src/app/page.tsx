@@ -8,101 +8,83 @@ import CategoryGrid from '@/components/sections/CategoryGrid';
 import JobExplorer from '@/components/sections/JobExplorer';
 import AdmitCardsResults from '@/components/sections/AdmitCardsResults';
 import ScrollReveal from '@/components/common/ScrollReveal';
-import { Bell, Sparkles, ShieldCheck, ArrowDown } from 'lucide-react';
+import { Bell, Sparkles, ShieldCheck, ArrowDown, AlertCircle } from 'lucide-react';
 import Link from 'next/link';
 
 export default async function HomePage() {
   await connection();
-  await connectDB();
 
-  const now = new Date();
-  const sevenDaysLater = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
+  let totalActiveJobs = 0;
+  let endingSoonCount = 0;
+  let resultsCount = 0;
+  let admitCardCount = 0;
+  let latestJobsDocs: unknown[] = [];
+  let endingSoonDocs: unknown[] = [];
+  let admitCardsDocs: unknown[] = [];
+  let resultsDocs: unknown[] = [];
+  let categoryCountsAgg: { _id: string; count: number }[] = [];
+  let isDbConnected = true;
 
-  // Parallel DB queries
-  let [
-    totalActiveJobs,
-    endingSoonCount,
-    resultsCount,
-    admitCardCount,
-    latestJobsDocs,
-    endingSoonDocs,
-    admitCardsDocs,
-    resultsDocs,
-    categoryCountsAgg,
-  ] = await Promise.all([
-    Job.countDocuments({ isActive: true, postType: 'Latest Job' }),
-    Job.countDocuments({
-      isActive: true,
-      applicationEndDate: { $gte: now, $lte: sevenDaysLater },
-    }),
-    Job.countDocuments({ postType: 'Result' }),
-    Job.countDocuments({ postType: 'Admit Card' }),
-    Job.find({ isActive: true })
-      .sort({ createdAt: -1 })
-      .limit(12)
-      .lean(),
-    Job.find({
-      isActive: true,
-      applicationEndDate: { $gte: now, $lte: sevenDaysLater },
-    })
-      .sort({ applicationEndDate: 1 })
-      .limit(6)
-      .lean(),
-    Job.find({ postType: 'Admit Card' })
-      .sort({ createdAt: -1 })
-      .limit(6)
-      .lean(),
-    Job.find({ postType: 'Result' })
-      .sort({ createdAt: -1 })
-      .limit(6)
-      .lean(),
-    Job.aggregate([
-      { $match: { isActive: true } },
-      { $group: { _id: '$category', count: { $sum: 1 } } },
-    ]),
-  ]);
+  try {
+    await connectDB();
+    const now = new Date();
+    const sevenDaysLater = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
 
-  // If the database has 0 active jobs on initialization (e.g. fresh database setup),
-  // automatically trigger an initial scrape so the website is immediately populated.
-  if (totalActiveJobs === 0 && process.env.NEXT_PHASE !== 'phase-production-build') {
-    try {
-      console.log('[HomePage] Initializing website: 0 active jobs found, running initial scrape...');
-      const { runAllScrapers } = await import('@/lib/scraper');
-      await runAllScrapers(20);
+    // Parallel DB queries
+    [
+      totalActiveJobs,
+      endingSoonCount,
+      resultsCount,
+      admitCardCount,
+      latestJobsDocs,
+      endingSoonDocs,
+      admitCardsDocs,
+      resultsDocs,
+      categoryCountsAgg,
+    ] = await Promise.all([
+      Job.countDocuments({ isActive: true, postType: 'Latest Job' }),
+      Job.countDocuments({
+        isActive: true,
+        applicationEndDate: { $gte: now, $lte: sevenDaysLater },
+      }),
+      Job.countDocuments({ postType: 'Result' }),
+      Job.countDocuments({ postType: 'Admit Card' }),
+      Job.find({ isActive: true })
+        .sort({ createdAt: -1 })
+        .limit(12)
+        .lean(),
+      Job.find({
+        isActive: true,
+        applicationEndDate: { $gte: now, $lte: sevenDaysLater },
+      })
+        .sort({ applicationEndDate: 1 })
+        .limit(6)
+        .lean(),
+      Job.find({ postType: 'Admit Card' })
+        .sort({ createdAt: -1 })
+        .limit(6)
+        .lean(),
+      Job.find({ postType: 'Result' })
+        .sort({ createdAt: -1 })
+        .limit(6)
+        .lean(),
+      Job.aggregate([
+        { $match: { isActive: true } },
+        { $group: { _id: '$category', count: { $sum: 1 } } },
+      ]),
+    ]);
 
-      [
-        totalActiveJobs,
-        endingSoonCount,
-        resultsCount,
-        admitCardCount,
-        latestJobsDocs,
-        endingSoonDocs,
-        admitCardsDocs,
-        resultsDocs,
-        categoryCountsAgg,
-      ] = await Promise.all([
-        Job.countDocuments({ isActive: true, postType: 'Latest Job' }),
-        Job.countDocuments({
-          isActive: true,
-          applicationEndDate: { $gte: now, $lte: sevenDaysLater },
-        }),
-        Job.countDocuments({ postType: 'Result' }),
-        Job.countDocuments({ postType: 'Admit Card' }),
-        Job.find({ isActive: true }).sort({ createdAt: -1 }).limit(12).lean(),
-        Job.find({
-          isActive: true,
-          applicationEndDate: { $gte: now, $lte: sevenDaysLater },
-        }).sort({ applicationEndDate: 1 }).limit(6).lean(),
-        Job.find({ postType: 'Admit Card' }).sort({ createdAt: -1 }).limit(6).lean(),
-        Job.find({ postType: 'Result' }).sort({ createdAt: -1 }).limit(6).lean(),
-        Job.aggregate([
-          { $match: { isActive: true } },
-          { $group: { _id: '$category', count: { $sum: 1 } } },
-        ]),
-      ]);
-    } catch (err) {
-      console.error('[HomePage] Initial scrape on website startup failed:', err);
+    // If 0 active jobs on initialization, trigger background scrape asynchronously (non-blocking)
+    if (totalActiveJobs === 0 && process.env.NEXT_PHASE !== 'phase-production-build') {
+      import('@/lib/scraper/scheduler').then(({ triggerScrape }) => {
+        triggerScrape('empty-db-initialization', 15).catch((err) =>
+          console.error('[HomePage] Background startup scrape notice:', err)
+        );
+      });
     }
+  } catch (dbErr) {
+    isDbConnected = false;
+    console.error('[HomePage] Database query fallback (rendering safe UI):', dbErr);
   }
 
   const stats: DashboardStats = {
@@ -128,6 +110,18 @@ export default async function HomePage() {
 
   return (
     <div className="max-w-7xl mx-auto px-3.5 sm:px-6 lg:px-8 py-4 sm:py-6">
+      {!isDbConnected && (
+        <div className="mb-6 p-4 rounded-2xl bg-amber-50 border border-amber-200 text-amber-900 text-xs sm:text-sm flex items-start gap-3 shadow-2xs">
+          <AlertCircle className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
+          <div className="space-y-1">
+            <p className="font-bold">Database Setup Notice</p>
+            <p className="text-amber-800 text-xs leading-relaxed">
+              If deploying on Vercel, please ensure <code className="bg-amber-100 px-1.5 py-0.5 rounded font-mono font-bold">MONGODB_URI</code> is added in <strong>Vercel Dashboard &rarr; Project Settings &rarr; Environment Variables</strong>, and your MongoDB Atlas has Network Access set to <code className="bg-amber-100 px-1.5 py-0.5 rounded font-mono font-bold">0.0.0.0/0</code> (Allow Access from Anywhere).
+            </p>
+          </div>
+        </div>
+      )}
+
       {/* Hero Banner with Smooth Floating Accents */}
       <section className="relative overflow-hidden rounded-3xl bg-gradient-to-r from-blue-950 via-indigo-950 to-slate-900 text-white p-6 sm:p-10 shadow-xl mb-6 animate-fade-in border border-blue-900/40">
         <div className="absolute top-0 right-0 w-80 sm:w-96 h-80 sm:h-96 bg-blue-500/15 rounded-full blur-3xl pointer-events-none" />
@@ -138,6 +132,7 @@ export default async function HomePage() {
             <Sparkles className="w-3.5 h-3.5 text-amber-300" />
             <span>Automated 24/7 Government Job Portal</span>
           </div>
+
 
           <h1 className="text-2xl sm:text-4xl lg:text-5xl font-black tracking-tight leading-tight">
             Find Every <span className="text-amber-400">Sarkari Naukri</span> in One Place.

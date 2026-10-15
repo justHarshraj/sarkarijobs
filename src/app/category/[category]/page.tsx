@@ -31,7 +31,6 @@ import { connection } from 'next/server';
 
 export default async function CategoryPage({ params }: Props) {
   await connection();
-  await connectDB();
   const { category: slug } = await params;
 
   const catMeta = CATEGORIES.find((c) => c.slug.toLowerCase() === slug.toLowerCase());
@@ -39,11 +38,17 @@ export default async function CategoryPage({ params }: Props) {
     notFound();
   }
 
-  const jobsDocs = await Job.find({ category: catMeta.name, isActive: true })
-    .sort({ createdAt: -1 })
-    .lean();
+  let jobs: IJob[] = [];
+  try {
+    await connectDB();
+    const jobsDocs = await Job.find({ category: catMeta.name, isActive: true })
+      .sort({ createdAt: -1 })
+      .lean();
+    jobs = JSON.parse(JSON.stringify(jobsDocs)) as IJob[];
+  } catch (err) {
+    console.error('[CategoryPage] DB error:', err);
+  }
 
-  const jobs = JSON.parse(JSON.stringify(jobsDocs)) as IJob[];
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
