@@ -4,7 +4,7 @@
 // High-performance bulk ingestion with adaptive concurrency
 // ============================================================
 
-import { runAllScrapers, runScraperForSource } from '../src/lib/scraper';
+import { runAllScrapers, runScraperForSource, cleanupNotNeededJobs } from '../src/lib/scraper';
 import type { PostType } from '../src/types';
 
 interface CliArgs {
@@ -120,14 +120,17 @@ async function main() {
       totalErrors += r.errors;
     }
 
+    const cleanup = await cleanupNotNeededJobs();
+
     console.log('\n======================================================');
-    console.log('🎉  POOL SCRAPE COMPLETE');
+    console.log('🎉  POOL SCRAPE & MAINTENANCE COMPLETE');
     console.log('======================================================');
     console.log(`• Total Elapsed Time : ${elapsedSeconds}s`);
     console.log(`• Listings Harvested : ${totalHarvested}`);
     console.log(`• New Jobs Added     : ${totalNew}`);
     console.log(`• Existing Updated   : ${totalUpdated}`);
     console.log(`• Skipped (Fresh/Old): ${totalSkipped}`);
+    console.log(`• Pruned (Not Needed): ${cleanup.totalDeleted}`);
     console.log(`• Errors / Misses    : ${totalErrors}`);
     console.log(
       `• Overall Throughput : ${(

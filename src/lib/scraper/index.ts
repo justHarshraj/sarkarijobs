@@ -239,15 +239,21 @@ export async function runScraperForSource(
   }
 
   const now = Date.now();
-  const freshTtlMs = 48 * 60 * 60 * 1000; // 48 hours freshness window
+  const freshTtlMs = 12 * 60 * 60 * 1000; // 12 hours freshness window for active jobs
   const toProcess: ScrapedJobListing[] = [];
 
   for (const item of uniqueListings) {
     const existing = existingMap.get(item.url);
 
     if (existing && !forceRefresh) {
-      // If job is already expired (deadline passed), permanently skip re-scraping
-      if (existing.applicationEndDate) {
+      // Check if portal listing text or dates have changed (e.g. extension, admit card, exam date)
+      const hasTitleChanged =
+        existing.title &&
+        item.title &&
+        existing.title.trim().toLowerCase() !== item.title.trim().toLowerCase();
+
+      // If job is already expired and title hasn't changed, permanently skip re-scraping
+      if (existing.applicationEndDate && !hasTitleChanged) {
         const endTimestamp = new Date(existing.applicationEndDate).getTime();
         if (endTimestamp < now) {
           result.skipped++;
@@ -255,8 +261,8 @@ export async function runScraperForSource(
         }
       }
 
-      // If scraped recently within TTL, skip
-      if (existing.scrapedAt) {
+      // If scraped recently within 12h TTL and title has not changed, skip to save bandwidth
+      if (existing.scrapedAt && !hasTitleChanged) {
         const lastScrapedTime = new Date(existing.scrapedAt).getTime();
         if (now - lastScrapedTime < freshTtlMs) {
           result.skipped++;
@@ -499,12 +505,72 @@ export async function runAllScrapers(
     }
   }
 
-  // Single sweep to update overall flags
+  // Single sweep to update overall flags & prune not needed jobs
   await updateJobStatusFlags();
+  await cleanupNotNeededJobs();
 
   const totalTime = ((Date.now() - startTime) / 1000).toFixed(2);
-  console.log(`[Scraper Orchestrator] All scrapers finished in ${totalTime}s.`);
+  console.log(`[Scraper Orchestrator] All scrapers & maintenance finished in ${totalTime}s.`);
   return results;
+}
+
+export interface CleanupResult {
+  deletedExpiredJobs: number;
+  deletedOldNotices: number;
+  deletedMalformed: number;
+  totalDeleted: number;
+}
+
+/**
+ * Automatically purges obsolete, expired, and malformed jobs
+ * to keep database clean, fast, and high quality.
+ */
+export async function cleanupNotNeededJobs(retentionDays = 60): Promise<CleanupResult> {
+  await connectDB();
+  const now = new Date();
+  const expiredRetention = new Date(now.getTime() - retentionDays * 24 * 60 * 60 * 1000);
+  const oldNoticeRetention = new Date(now.getTime() - 90 * 24 * 60 * 60 * 1000);
+
+  // 1. Delete jobs where application ended more than 60 days ago
+  const expiredRes = await Job.deleteMany({
+    postType: 'Latest Job',
+    applicationEndDate: { $lt: expiredRetention },
+    isActive: false,
+  });
+
+  // 2. Delete old results/admit cards older than 90 days
+  const oldNoticesRes = await Job.deleteMany({
+    postType: { $in: ['Result', 'Admit Card', 'Answer Key'] },
+    createdAt: { $lt: oldNoticeRetention },
+  });
+
+  // 3. Delete broken/empty/malformed entries
+  const malformedRes = await Job.deleteMany({
+    $or: [
+      { title: { $exists: false } },
+      { title: '' },
+      { title: { $regex: /^.{0,4}$/ } },
+      { sourceUrl: { $exists: false } },
+    ],
+  });
+
+  const totalDeleted =
+    (expiredRes.deletedCount || 0) +
+    (oldNoticesRes.deletedCount || 0) +
+    (malformedRes.deletedCount || 0);
+
+  if (totalDeleted > 0) {
+    console.log(
+      `[Cleaner] 🧹 Cleanup complete: ${totalDeleted} not-needed jobs removed (Expired: ${expiredRes.deletedCount || 0}, Old notices: ${oldNoticesRes.deletedCount || 0}, Malformed: ${malformedRes.deletedCount || 0})`
+    );
+  }
+
+  return {
+    deletedExpiredJobs: expiredRes.deletedCount || 0,
+    deletedOldNotices: oldNoticesRes.deletedCount || 0,
+    deletedMalformed: malformedRes.deletedCount || 0,
+    totalDeleted,
+  };
 }
 
 /**

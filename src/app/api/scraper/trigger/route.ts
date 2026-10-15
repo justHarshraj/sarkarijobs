@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { runAllScrapers, runScraperForSource } from '@/lib/scraper';
+import { runAllScrapers, runScraperForSource, cleanupNotNeededJobs } from '@/lib/scraper';
 import { getScraperStatus } from '@/lib/scraper/scheduler';
 import { getSafeErrorMessage } from '@/lib/utils/sanitizer';
 import type { PostType } from '@/types';
@@ -71,10 +71,14 @@ export async function POST(req: NextRequest) {
       results = await runAllScrapers(scraperOpts);
     }
 
+    // Run maintenance to delete not-needed / obsolete jobs
+    const cleanup = await cleanupNotNeededJobs();
+
     return NextResponse.json({
       success: true,
-      message: 'Scraping run completed successfully',
+      message: 'Scraping and maintenance run completed successfully',
       results,
+      cleanup,
     });
   } catch (err: unknown) {
     return NextResponse.json(
