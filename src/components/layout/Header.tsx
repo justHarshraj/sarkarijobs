@@ -37,7 +37,7 @@ export default function Header({}: HeaderProps) {
     setIsSyncing(true);
     setSyncLabel('Syncing...');
     try {
-      const res = await fetch('/api/scraper/trigger?run=true&limit=200');
+      const res = await fetch('/api/scraper/trigger?run=true&limit=300');
       if (res.ok) {
         setSyncLabel('Synced!');
         router.refresh();

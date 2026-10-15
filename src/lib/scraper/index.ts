@@ -293,8 +293,9 @@ export async function runScraperForSource(
     let slug = baseSlug;
     let counter = 1;
     while (existingSlugs.has(slug)) {
-      slug = `${baseSlug}-${Date.now().toString().slice(-4)}${counter > 1 ? `-${counter}` : ''}`;
+      slug = `${baseSlug}-${Math.random().toString(36).substring(2, 6)}${counter > 1 ? `-${counter}` : ''}`;
       counter++;
+      if (counter > 10) break;
     }
     existingSlugs.add(slug);
     return slug;
@@ -411,9 +412,26 @@ export async function runScraperForSource(
       }
     }
 
-    // Execute bulk write in 1 roundtrip
+    // Execute bulk write in 1 roundtrip with conflict recovery
     if (bulkOps.length > 0) {
-      await Job.bulkWrite(bulkOps, { ordered: false });
+      try {
+        await Job.bulkWrite(bulkOps, { ordered: false });
+      } catch (bulkErr: unknown) {
+        const isBulkWriteConflict =
+          bulkErr &&
+          typeof bulkErr === 'object' &&
+          ('code' in bulkErr || 'name' in bulkErr) &&
+          ((bulkErr as { code?: number }).code === 11000 ||
+            (bulkErr as { name?: string }).name === 'MongoBulkWriteError');
+
+        if (isBulkWriteConflict) {
+          console.warn(
+            `[Scraper] Handled duplicate conflict during bulk write. Non-conflicting items were safely committed.`
+          );
+        } else {
+          throw bulkErr;
+        }
+      }
     }
 
     processedSoFar += chunkItems.length;
@@ -462,21 +480,22 @@ export async function runAllScrapers(
       ? { maxItems: maxItemsOrOptions }
       : maxItemsOrOptions;
 
-  const maxItems = options.maxItems || 50;
-  console.log(`[Scraper Orchestrator] Running all scrapers concurrently (maxItems=${maxItems})...`);
+  const maxItems = options.maxItems || 200;
+  console.log(`[Scraper Orchestrator] Running all scrapers in sequence (maxItems=${maxItems})...`);
   const startTime = Date.now();
 
-  const settled = await Promise.allSettled([
-    runScraperForSource('sarkariresult.com', options),
-    runScraperForSource('sarkariresult.com.cm', options),
-  ]);
+  const sources: ('sarkariresult.com' | 'sarkariresult.com.cm')[] = [
+    'sarkariresult.com',
+    'sarkariresult.com.cm',
+  ];
 
   const results: ScraperRunResult[] = [];
-  for (const res of settled) {
-    if (res.status === 'fulfilled') {
-      results.push(res.value);
-    } else {
-      console.error('[Scraper Orchestrator] Scraper source execution failed:', res.reason);
+  for (const source of sources) {
+    try {
+      const res = await runScraperForSource(source, options);
+      results.push(res);
+    } catch (err) {
+      console.error(`[Scraper Orchestrator] Scraper source ${source} execution failed:`, err);
     }
   }
 

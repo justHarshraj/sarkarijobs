@@ -29,8 +29,8 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   try {
     let source = 'all';
-    let limit = 200;
-    let concurrency = 10;
+    let limit = 300;
+    let concurrency = 12;
     let forceRefresh = false;
     let category: PostType | 'all' | undefined = undefined;
 

@@ -142,17 +142,43 @@ export async function scrapeSarkariResultListings(
   });
 
   const settled = await Promise.allSettled(pagePromises);
+  const categoryPools: ScrapedJobListing[][] = [];
+
   for (const result of settled) {
-    if (result.status === 'fulfilled') {
-      for (const item of result.value) {
+    if (result.status === 'fulfilled' && result.value.length > 0) {
+      categoryPools.push(result.value);
+    }
+  }
+
+  // Interleave (round-robin) across categories so EVERY category (Jobs, Admit Cards, Results, etc.) gets fair share
+  const perCategoryQuota = Math.max(30, Math.ceil(maxItems / Math.max(1, categoryPools.length)));
+
+  for (const pool of categoryPools) {
+    let addedForCategory = 0;
+    for (const item of pool) {
+      if (addedForCategory >= perCategoryQuota) break;
+      if (!visitedUrls.has(item.url)) {
+        visitedUrls.add(item.url);
+        listings.push(item);
+        addedForCategory++;
+        if (listings.length >= maxItems) break;
+      }
+    }
+    if (listings.length >= maxItems) break;
+  }
+
+  // If still below maxItems, fill from remaining items
+  if (listings.length < maxItems) {
+    for (const pool of categoryPools) {
+      for (const item of pool) {
         if (!visitedUrls.has(item.url)) {
           visitedUrls.add(item.url);
           listings.push(item);
           if (listings.length >= maxItems) break;
         }
       }
+      if (listings.length >= maxItems) break;
     }
-    if (listings.length >= maxItems) break;
   }
 
   console.log(`[sarkariresult.com] Successfully harvested ${listings.length} candidate listings.`);

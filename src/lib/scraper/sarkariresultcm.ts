@@ -145,17 +145,43 @@ export async function scrapeSarkariResultCmListings(
   });
 
   const settled = await Promise.allSettled(pagePromises);
+  const categoryPools: ScrapedJobListing[][] = [];
+
   for (const result of settled) {
-    if (result.status === 'fulfilled') {
-      for (const item of result.value) {
+    if (result.status === 'fulfilled' && result.value.length > 0) {
+      categoryPools.push(result.value);
+    }
+  }
+
+  // Interleave across categories so Admit Card, Result, etc. get fair quota
+  const perCategoryQuota = Math.max(30, Math.ceil(maxItems / Math.max(1, categoryPools.length)));
+
+  for (const pool of categoryPools) {
+    let addedForCategory = 0;
+    for (const item of pool) {
+      if (addedForCategory >= perCategoryQuota) break;
+      if (!visitedUrls.has(item.url)) {
+        visitedUrls.add(item.url);
+        listings.push(item);
+        addedForCategory++;
+        if (listings.length >= maxItems) break;
+      }
+    }
+    if (listings.length >= maxItems) break;
+  }
+
+  // Fill remainder if any
+  if (listings.length < maxItems) {
+    for (const pool of categoryPools) {
+      for (const item of pool) {
         if (!visitedUrls.has(item.url)) {
           visitedUrls.add(item.url);
           listings.push(item);
           if (listings.length >= maxItems) break;
         }
       }
+      if (listings.length >= maxItems) break;
     }
-    if (listings.length >= maxItems) break;
   }
 
   console.log(`[sarkariresult.com.cm] Successfully harvested ${listings.length} candidate listings.`);
