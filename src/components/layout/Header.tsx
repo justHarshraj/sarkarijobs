@@ -244,9 +244,9 @@ export default function Header({}: HeaderProps) {
                 );
               })}
 
-              {/* Automated 6-Hour Background Sync Status Badge */}
+              {/* Automated Background Sync Status Badge */}
               <div
-                title="Automated 24/7 background sync every 6 hours"
+                title="Automated 24/7 background sync: Runs on website startup & every 6 hours"
                 className="ml-2 px-3 py-1.5 rounded-xl bg-emerald-50/90 border border-emerald-200/80 text-emerald-800 font-bold text-xs flex items-center gap-2 shadow-2xs select-none cursor-default"
               >
                 <span className="relative flex h-2 w-2">
@@ -258,7 +258,7 @@ export default function Header({}: HeaderProps) {
               </div>
             </div>
 
-            {/* Mobile Controls (Search trigger, Automated 6h indicator, Hamburger) */}
+            {/* Mobile Controls (Search trigger, Automated indicator, Hamburger) */}
             <div className="flex items-center gap-1.5 lg:hidden">
               <button
                 onClick={() => setIsMobileSearchOpen(true)}
@@ -270,7 +270,7 @@ export default function Header({}: HeaderProps) {
 
               {/* Mobile Auto-Sync Status Badge */}
               <div
-                title="Automated sync active every 6 hours"
+                title="Automated sync active: On startup & every 6 hours"
                 className="px-2 py-1 rounded-lg bg-emerald-50 border border-emerald-200/80 text-emerald-800 text-[10px] font-bold flex items-center gap-1.5 select-none"
               >
                 <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
@@ -316,7 +316,7 @@ export default function Header({}: HeaderProps) {
               <div className="pt-2 border-t border-slate-100 flex items-center justify-between text-xs text-slate-500">
                 <span className="flex items-center gap-1.5 font-semibold text-emerald-700">
                   <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-                  Auto-Sync Active (Every 6 Hours)
+                  Auto-Sync Active (Startup & Every 6h)
                 </span>
                 <Link
                   href="/#categories"

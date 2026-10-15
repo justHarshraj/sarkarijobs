@@ -1,6 +1,6 @@
 // ============================================================
 // Automated Task Queue / Scheduler using node-cron
-// Automatically syncs job portals every 6 hours in the background
+// Automatically syncs job portals on website initialization + every 6 hours
 // ============================================================
 
 import cron, { type ScheduledTask } from 'node-cron';
@@ -10,40 +10,71 @@ let isScraperRunning = false;
 let cronJobInstance: ScheduledTask | null = null;
 let lastRunTime: Date | null = null;
 let lastRunDurationMs = 0;
+let hasInitializedScrape = false;
+
+/**
+ * Triggers a scraping run with concurrency lock
+ */
+export async function triggerScrape(reason = 'manual', maxItems = 20) {
+  if (isScraperRunning) {
+    console.log(`[Scheduler] Scraper already running, skipping trigger (${reason}).`);
+    return { success: false, message: 'Scraper already in progress' };
+  }
+
+  isScraperRunning = true;
+  const startTime = Date.now();
+  console.log(`[Scheduler] 🚀 Scraper triggered (${reason}) at: ${new Date().toISOString()}`);
+
+  try {
+    const results = await runAllScrapers(maxItems);
+    lastRunTime = new Date();
+    lastRunDurationMs = Date.now() - startTime;
+    hasInitializedScrape = true;
+    console.log(
+      `[Scheduler] ✅ Scrape completed (${reason}) in ${(lastRunDurationMs / 1000).toFixed(2)}s:`,
+      results
+    );
+    return { success: true, results, durationMs: lastRunDurationMs };
+  } catch (err) {
+    console.error(`[Scheduler] ❌ Error during scrape execution (${reason}):`, err);
+    throw err;
+  } finally {
+    isScraperRunning = false;
+  }
+}
 
 /**
  * Initializes the automated scraping schedule (every 6 hours)
+ * and triggers an immediate scrape on website initialization.
  * Schedule: At minute 0 past every 6th hour (00:00, 06:00, 12:00, 18:00)
  */
-export function initScraperScheduler(cronExpression = '0 */6 * * *') {
+export function initScraperScheduler(cronExpression = '0 */6 * * *', runOnStartup = true) {
   if (cronJobInstance) {
-    console.log('[Scheduler] ⏰ Cron job already initialized (Every 6 hours).');
+    console.log('[Scheduler] ⏰ Cron job already active.');
+    if (runOnStartup && !hasInitializedScrape && !isScraperRunning) {
+      triggerScrape('website-initialization', 20).catch((err) =>
+        console.error('[Scheduler] Initial startup scrape warning:', err)
+      );
+    }
     return cronJobInstance;
   }
 
   console.log(`[Scheduler] ⏰ Initializing automated 6-hour scraper with schedule: "${cronExpression}"`);
 
   cronJobInstance = cron.schedule(cronExpression, async () => {
-    if (isScraperRunning) {
-      console.log('[Scheduler] Scraper already running, skipping scheduled trigger.');
-      return;
-    }
-
-    isScraperRunning = true;
-    const startTime = Date.now();
     console.log(`[Scheduler] ⏰ Scheduled 6-hour auto-sync triggered at: ${new Date().toISOString()}`);
-
-    try {
-      const results = await runAllScrapers();
-      lastRunTime = new Date();
-      lastRunDurationMs = Date.now() - startTime;
-      console.log(`[Scheduler] ✅ 6-hour automated scrape completed in ${(lastRunDurationMs / 1000).toFixed(2)}s:`, results);
-    } catch (err) {
-      console.error('[Scheduler] ❌ Error during scheduled scrape execution:', err);
-    } finally {
-      isScraperRunning = false;
-    }
+    await triggerScrape('scheduled-6h-cron', 25).catch((err) =>
+      console.error('[Scheduler] Error during scheduled cron scrape:', err)
+    );
   });
+
+  // Trigger immediate scrape upon website initialization
+  if (runOnStartup && !hasInitializedScrape) {
+    console.log('[Scheduler] 🚀 Website initialization detected: Running immediate initial scrape...');
+    triggerScrape('website-initialization', 20).catch((err) =>
+      console.error('[Scheduler] Initial startup scrape warning:', err)
+    );
+  }
 
   return cronJobInstance;
 }
@@ -70,9 +101,11 @@ export function getScraperStatus() {
   return {
     isRunning: isScraperRunning,
     isScheduled: cronJobInstance !== null,
-    schedule: 'Every 6 hours (0 */6 * * *)',
+    schedule: 'Every 6 hours (0 */6 * * *) + on website initialization',
     lastRunTime: lastRunTime ? lastRunTime.toISOString() : null,
     lastRunDurationMs,
+    hasInitializedScrape,
     timestamp: new Date().toISOString(),
   };
 }
+

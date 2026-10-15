@@ -19,7 +19,7 @@ export default async function HomePage() {
   const sevenDaysLater = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
 
   // Parallel DB queries
-  const [
+  let [
     totalActiveJobs,
     endingSoonCount,
     resultsCount,
@@ -61,6 +61,49 @@ export default async function HomePage() {
       { $group: { _id: '$category', count: { $sum: 1 } } },
     ]),
   ]);
+
+  // If the database has 0 active jobs on initialization (e.g. fresh database setup),
+  // automatically trigger an initial scrape so the website is immediately populated.
+  if (totalActiveJobs === 0 && process.env.NEXT_PHASE !== 'phase-production-build') {
+    try {
+      console.log('[HomePage] Initializing website: 0 active jobs found, running initial scrape...');
+      const { runAllScrapers } = await import('@/lib/scraper');
+      await runAllScrapers(20);
+
+      [
+        totalActiveJobs,
+        endingSoonCount,
+        resultsCount,
+        admitCardCount,
+        latestJobsDocs,
+        endingSoonDocs,
+        admitCardsDocs,
+        resultsDocs,
+        categoryCountsAgg,
+      ] = await Promise.all([
+        Job.countDocuments({ isActive: true, postType: 'Latest Job' }),
+        Job.countDocuments({
+          isActive: true,
+          applicationEndDate: { $gte: now, $lte: sevenDaysLater },
+        }),
+        Job.countDocuments({ postType: 'Result' }),
+        Job.countDocuments({ postType: 'Admit Card' }),
+        Job.find({ isActive: true }).sort({ createdAt: -1 }).limit(12).lean(),
+        Job.find({
+          isActive: true,
+          applicationEndDate: { $gte: now, $lte: sevenDaysLater },
+        }).sort({ applicationEndDate: 1 }).limit(6).lean(),
+        Job.find({ postType: 'Admit Card' }).sort({ createdAt: -1 }).limit(6).lean(),
+        Job.find({ postType: 'Result' }).sort({ createdAt: -1 }).limit(6).lean(),
+        Job.aggregate([
+          { $match: { isActive: true } },
+          { $group: { _id: '$category', count: { $sum: 1 } } },
+        ]),
+      ]);
+    } catch (err) {
+      console.error('[HomePage] Initial scrape on website startup failed:', err);
+    }
+  }
 
   const stats: DashboardStats = {
     totalActiveJobs,
