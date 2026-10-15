@@ -120,13 +120,13 @@ export default async function JobDetailPage({ params }: Props) {
         )}
 
         {/* Action CTAs: Apply Now & Download PDF */}
-        <div className="flex flex-wrap items-center gap-3 pt-4 border-t border-slate-100">
+        <div className="flex flex-wrap items-center gap-2.5 sm:gap-3 pt-4 border-t border-slate-100">
           {job.applyOnlineUrl ? (
             <a
               href={job.applyOnlineUrl}
               target="_blank"
               rel="noopener noreferrer"
-              className="py-3 px-6 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-sm shadow-md shadow-emerald-600/20 flex items-center gap-2 transition-all active:scale-95"
+              className="w-full sm:w-auto py-3 px-6 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-sm shadow-md shadow-emerald-600/20 flex items-center justify-center gap-2 transition-all touch-scale"
             >
               <span>Apply Online Now</span>
               <ExternalLink className="w-4 h-4" />
@@ -138,7 +138,7 @@ export default async function JobDetailPage({ params }: Props) {
               href={job.notificationPdfUrl}
               target="_blank"
               rel="noopener noreferrer"
-              className="py-3 px-6 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-bold text-sm shadow-md shadow-rose-600/20 flex items-center gap-2 transition-all active:scale-95"
+              className="w-full sm:w-auto py-3 px-6 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-bold text-sm shadow-md shadow-rose-600/20 flex items-center justify-center gap-2 transition-all touch-scale"
             >
               <FileText className="w-4 h-4" />
               <span>Download Official PDF</span>
@@ -150,7 +150,7 @@ export default async function JobDetailPage({ params }: Props) {
               href={job.officialWebsiteUrl}
               target="_blank"
               rel="noopener noreferrer"
-              className="py-3 px-5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-800 font-semibold text-sm flex items-center gap-2 transition-colors"
+              className="w-full sm:w-auto py-3 px-5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-800 font-semibold text-sm flex items-center justify-center gap-2 transition-colors touch-scale"
             >
               <span>Official Website</span>
               <ExternalLink className="w-4 h-4 text-slate-500" />
@@ -431,6 +431,34 @@ export default async function JobDetailPage({ params }: Props) {
               <JobCard key={r.slug} job={r} />
             ))}
           </div>
+        </div>
+      )}
+
+      {/* Mobile Sticky Bottom Action Bar */}
+      {(job.applyOnlineUrl || job.notificationPdfUrl) && (
+        <div className="md:hidden fixed bottom-14 left-0 right-0 z-40 bg-white/95 backdrop-blur-md border-t border-slate-200/90 px-3 py-2 shadow-lg flex items-center gap-2">
+          {job.applyOnlineUrl && (
+            <a
+              href={job.applyOnlineUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex-1 py-2 px-3 rounded-xl bg-emerald-600 text-white text-xs font-bold text-center flex items-center justify-center gap-1.5 shadow-xs touch-scale"
+            >
+              <span>Apply Online</span>
+              <ExternalLink className="w-3.5 h-3.5" />
+            </a>
+          )}
+          {job.notificationPdfUrl && (
+            <a
+              href={job.notificationPdfUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="py-2 px-3 rounded-xl bg-slate-100 text-slate-800 text-xs font-bold text-center flex items-center justify-center gap-1.5 border border-slate-200 touch-scale"
+            >
+              <FileText className="w-3.5 h-3.5 text-red-600" />
+              <span>PDF</span>
+            </a>
+          )}
         </div>
       )}
     </div>

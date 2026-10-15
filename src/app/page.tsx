@@ -7,7 +7,9 @@ import EndingSoon from '@/components/sections/EndingSoon';
 import CategoryGrid from '@/components/sections/CategoryGrid';
 import JobExplorer from '@/components/sections/JobExplorer';
 import AdmitCardsResults from '@/components/sections/AdmitCardsResults';
-import { Bell, Sparkles, ShieldCheck } from 'lucide-react';
+import ScrollReveal from '@/components/common/ScrollReveal';
+import { Bell, Sparkles, ShieldCheck, ArrowDown } from 'lucide-react';
+import Link from 'next/link';
 
 export default async function HomePage() {
   await connection();
@@ -82,51 +84,70 @@ export default async function HomePage() {
   const results = JSON.parse(JSON.stringify(resultsDocs)) as IJob[];
 
   return (
-    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
-      {/* Hero Banner */}
-      <section className="relative overflow-hidden rounded-2xl bg-gradient-to-r from-blue-900 via-indigo-900 to-slate-900 text-white p-6 sm:p-10 shadow-lg mb-6">
-        <div className="absolute top-0 right-0 w-96 h-96 bg-blue-500/10 rounded-full blur-3xl pointer-events-none" />
+    <div className="max-w-7xl mx-auto px-3.5 sm:px-6 lg:px-8 py-4 sm:py-6">
+      {/* Hero Banner with Smooth Floating Accents */}
+      <section className="relative overflow-hidden rounded-3xl bg-gradient-to-r from-blue-950 via-indigo-950 to-slate-900 text-white p-6 sm:p-10 shadow-xl mb-6 animate-fade-in border border-blue-900/40">
+        <div className="absolute top-0 right-0 w-80 sm:w-96 h-80 sm:h-96 bg-blue-500/15 rounded-full blur-3xl pointer-events-none" />
+        <div className="absolute -bottom-10 left-1/3 w-64 h-64 bg-orange-500/10 rounded-full blur-3xl pointer-events-none" />
+
         <div className="relative z-10 max-w-3xl">
-          <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-blue-500/20 text-blue-200 border border-blue-400/20 text-xs font-semibold mb-3">
+          <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-blue-500/20 text-blue-200 border border-blue-400/20 text-xs font-bold mb-3 shadow-2xs">
             <Sparkles className="w-3.5 h-3.5 text-amber-300" />
-            <span>Automated 24/7 Government Job Aggregator</span>
+            <span>Automated 24/7 Government Job Portal</span>
           </div>
 
           <h1 className="text-2xl sm:text-4xl lg:text-5xl font-black tracking-tight leading-tight">
             Find Every <span className="text-amber-400">Sarkari Naukri</span> in One Place.
           </h1>
 
-          <p className="mt-3 text-sm sm:text-base text-slate-300 leading-relaxed max-w-2xl">
+          <p className="mt-3 text-xs sm:text-base text-slate-300 leading-relaxed max-w-2xl font-normal">
             Live tracked notifications from UPSC, SSC, Railways (RRB), Public Sector Banks (IBPS), Defence, and State Public Service Commissions with official PDF downloads & direct application portals.
           </p>
 
-          <div className="flex flex-wrap items-center gap-4 mt-6 text-xs text-slate-300 font-medium">
-            <div className="flex items-center gap-1.5 bg-white/10 px-3 py-1.5 rounded-lg backdrop-blur-xs">
+          <div className="flex flex-wrap items-center gap-2 sm:gap-4 mt-6 text-xs text-slate-300 font-medium">
+            <div className="flex items-center gap-1.5 bg-white/10 px-3 py-1.5 rounded-xl backdrop-blur-xs border border-white/10">
               <ShieldCheck className="w-4 h-4 text-emerald-400" />
               <span>100% Verified Official Sources</span>
             </div>
-            <div className="flex items-center gap-1.5 bg-white/10 px-3 py-1.5 rounded-lg backdrop-blur-xs">
+            <div className="flex items-center gap-1.5 bg-white/10 px-3 py-1.5 rounded-xl backdrop-blur-xs border border-white/10">
               <Bell className="w-4 h-4 text-amber-400" />
               <span>Real-time Deadline Alerts</span>
             </div>
+            <Link
+              href="/#latest-jobs"
+              className="flex items-center gap-1.5 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold px-3.5 py-1.5 rounded-xl transition-all shadow-xs touch-scale"
+            >
+              <span>Explore Vacancies</span>
+              <ArrowDown className="w-3.5 h-3.5" />
+            </Link>
           </div>
         </div>
       </section>
 
       {/* Key Metrics Dashboard */}
-      <StatsBar stats={stats} />
+      <ScrollReveal delayMs={100}>
+        <StatsBar stats={stats} />
+      </ScrollReveal>
 
       {/* Approaching Deadlines */}
-      <EndingSoon jobs={endingSoonJobs} />
+      <ScrollReveal delayMs={150}>
+        <EndingSoon jobs={endingSoonJobs} />
+      </ScrollReveal>
 
       {/* Sector / Department Categories */}
-      <CategoryGrid categoryCounts={categoryCounts} />
+      <ScrollReveal delayMs={200}>
+        <CategoryGrid categoryCounts={categoryCounts} />
+      </ScrollReveal>
 
       {/* Admit Cards & Results Showcase */}
-      <AdmitCardsResults admitCards={admitCards} results={results} />
+      <ScrollReveal delayMs={250}>
+        <AdmitCardsResults admitCards={admitCards} results={results} />
+      </ScrollReveal>
 
       {/* Main Filterable Jobs Explorer */}
-      <JobExplorer initialJobs={latestJobs} initialTotal={totalActiveJobs} />
+      <ScrollReveal delayMs={300}>
+        <JobExplorer initialJobs={latestJobs} initialTotal={totalActiveJobs} />
+      </ScrollReveal>
     </div>
   );
 }

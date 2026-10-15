@@ -176,6 +176,36 @@ Triggers an on-demand scraper run across all sources.
 
 ---
 
+---
+
+## 🚀 Production Deployment Guide
+
+### Option 1: Docker / Google Cloud Run / Railway / VPS
+The repository includes a production multi-stage `Dockerfile` with standalone Next.js output optimization (image size ~120MB).
+
+1. **Build Docker image**:
+   ```bash
+   docker build -t sarkarijobs:latest .
+   ```
+2. **Run container**:
+   ```bash
+   docker run -p 3000:3000 \
+     -e MONGODB_URI="mongodb+srv://user:pass@cluster.mongodb.net/sarkarijobs" \
+     -e NEXT_PUBLIC_APP_URL="https://yourdomain.com" \
+     -e SCRAPER_ENABLED="true" \
+     sarkarijobs:latest
+   ```
+
+### Option 2: Vercel Deployment
+1. Import repository into [Vercel](https://vercel.com).
+2. Set Environment Variables in Project Settings:
+   * `MONGODB_URI`: Your MongoDB Atlas connection string.
+   * `NEXT_PUBLIC_APP_URL`: Your production URL (`https://your-domain.vercel.app`).
+   * `SCRAPER_ENABLED`: `true`
+3. Hit **Deploy**. Next.js will build the standalone bundle and deploy across edge nodes.
+
+---
+
 ## ⚖️ Disclaimer
 
 This platform aggregates publicly announced recruitment notices and exam updates for informational purposes only. Candidates are advised to always cross-check details and download the official notification PDF before submitting applications.
@@ -185,3 +215,4 @@ This platform aggregates publicly announced recruitment notices and exam updates
 ## 📄 License
 
 MIT License. Feel free to use and contribute!
+

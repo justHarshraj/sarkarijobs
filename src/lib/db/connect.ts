@@ -2,16 +2,10 @@ import mongoose from 'mongoose';
 
 /**
  * MongoDB connection singleton.
- * Prevents multiple connections during Next.js hot reload in development.
+ * Prevents multiple connections during Next.js hot reload and serverless invocations.
  * Uses a global cache to maintain a single connection across module reloads.
  */
 
-const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://localhost:27017/sarkarijobs';
-
-/**
- * Global type augmentation to cache the Mongoose connection
- * across hot reloads in development.
- */
 declare global {
   var mongooseConnection: {
     conn: typeof mongoose | null;
@@ -26,20 +20,27 @@ if (!cached) {
 }
 
 async function connectDB(): Promise<typeof mongoose> {
+  if (mongoose.connection.readyState >= 1) {
+    return mongoose;
+  }
+
   if (cached.conn) {
     return cached.conn;
   }
 
   if (!cached.promise) {
+    const uri = process.env.MONGODB_URI || 'mongodb://localhost:27017/sarkarijobs';
+
     const opts: mongoose.ConnectOptions = {
       bufferCommands: false,
       maxPoolSize: 10,
-      serverSelectionTimeoutMS: 5000,
+      minPoolSize: 1,
+      serverSelectionTimeoutMS: 8000,
       socketTimeoutMS: 45000,
     };
 
     cached.promise = mongoose
-      .connect(MONGODB_URI as string, opts)
+      .connect(uri, opts)
       .then((mongooseInstance) => {
         console.log('✅ MongoDB connected successfully');
         return mongooseInstance;
