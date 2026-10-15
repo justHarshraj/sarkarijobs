@@ -1,10 +1,12 @@
 // ============================================================
-// Scraper Orchestrator — Coordinates extraction, normalization,
+// Scraper Orchestrator — High Performance & Efficient
+// Coordinates extraction, batch pre-filtering, concurrency pooling,
 // deduplication, and persistence into MongoDB.
 // ============================================================
 
 import { connectDB } from '@/lib/db/connect';
 import Job from '@/lib/db/models/Job';
+import type { Types } from 'mongoose';
 import type { IJob, ScrapedJobListing, ScrapedJobDetail } from '@/types';
 import { scrapeSarkariResultListings, scrapeSarkariResultDetail } from './sarkariresult';
 import { scrapeSarkariResultCmListings, scrapeSarkariResultCmDetail } from './sarkariresultcm';
@@ -22,6 +24,7 @@ import { parseIndianDate } from '@/lib/utils/dateParser';
 import { generateJobSlug } from '@/lib/utils/slugify';
 import { generateContentHash, isDuplicateJob } from '@/lib/utils/deduplicator';
 import { sleep, getRandomDelay } from '@/lib/utils/userAgents';
+import { asyncPool } from '@/lib/utils/asyncPool';
 
 export interface ScraperRunResult {
   source: string;
@@ -142,7 +145,7 @@ function normalizeScrapedJob(
 }
 
 /**
- * Runs the scraper for a specific source
+ * Runs the scraper for a specific source with batch pre-filtering and controlled concurrency
  */
 export async function runScraperForSource(
   source: 'sarkariresult.com' | 'sarkariresult.com.cm',
@@ -158,9 +161,17 @@ export async function runScraperForSource(
     listings = await scrapeSarkariResultCmListings(maxItems);
   }
 
+  // Deduplicate listings by URL
+  const seenListingUrls = new Set<string>();
+  const uniqueListings = listings.filter((item) => {
+    if (seenListingUrls.has(item.url)) return false;
+    seenListingUrls.add(item.url);
+    return true;
+  });
+
   const result: ScraperRunResult = {
     source,
-    totalFound: listings.length,
+    totalFound: uniqueListings.length,
     newJobs: 0,
     updatedJobs: 0,
     skipped: 0,
@@ -168,130 +179,173 @@ export async function runScraperForSource(
     durationMs: 0,
   };
 
-  console.log(`[Scraper Orchestrator] ${source}: Found ${listings.length} listings. Beginning processing...`);
-
-  for (const item of listings) {
-    try {
-      // 1. Check if job already exists by sourceUrl
-      const existingJob = await Job.findOne({ sourceUrl: item.url });
-
-      // If exists and scraped recently (within 24 hours), skip to be polite
-      if (existingJob) {
-        const lastScraped = new Date(existingJob.scrapedAt).getTime();
-        const oneDay = 24 * 60 * 60 * 1000;
-        if (Date.now() - lastScraped < oneDay) {
-          result.skipped++;
-          continue;
-        }
-      }
-
-      // 2. Fetch detail page
-      let detail: ScrapedJobDetail | null = null;
-      if (source === 'sarkariresult.com') {
-        detail = await scrapeSarkariResultDetail(item.url);
-      } else {
-        detail = await scrapeSarkariResultCmDetail(item.url);
-      }
-
-      if (!detail || !detail.title) {
-        result.errors++;
-        continue;
-      }
-
-      // 3. Normalize data
-      const normalized = normalizeScrapedJob(detail, item, source);
-
-      // 4. Deduplication Check against existing jobs from OTHER sources
-      if (!existingJob) {
-        const candidate = await Job.findOne({
-          state: normalized.state,
-          category: normalized.category,
-        }).select('title organization totalVacancies sourceUrl');
-
-        if (
-          candidate &&
-          isDuplicateJob(
-            {
-              title: normalized.title || '',
-              organization: normalized.organization,
-              totalVacancies: normalized.totalVacancies,
-            },
-            {
-              title: candidate.title,
-              organization: candidate.organization,
-              totalVacancies: candidate.totalVacancies,
-            }
-          )
-        ) {
-          console.log(`[Deduplicator] Job already exists across sources: "${normalized.title}" matches "${candidate.title}". Linking.`);
-          result.skipped++;
-          continue;
-        }
-      }
-
-      // 5. Upsert Job into MongoDB
-      if (existingJob) {
-        // Only update if sourceHash changed or refreshing status
-        await Job.updateOne(
-          { _id: existingJob._id },
-          {
-            $set: {
-              ...normalized,
-              slug: existingJob.slug, // preserve existing slug
-              lastUpdated: new Date(),
-            },
-          }
-        );
-        result.updatedJobs++;
-      } else {
-        // Ensure slug uniqueness
-        let slug = normalized.slug!;
-        const slugExists = await Job.findOne({ slug });
-        if (slugExists) {
-          slug = `${slug}-${Date.now().toString().slice(-4)}`;
-          normalized.slug = slug;
-        }
-
-        await Job.create(normalized);
-        result.newJobs++;
-      }
-
-      // Polite delay between detail requests
-      await sleep(getRandomDelay(1500, 3000));
-    } catch (err: unknown) {
-      result.errors++;
-      const message = err instanceof Error ? err.message : String(err);
-      console.error(`[Scraper Orchestrator] Error processing ${item.url}:`, message);
-    }
+  if (uniqueListings.length === 0) {
+    result.durationMs = Date.now() - startTime;
+    return result;
   }
 
-  // Update overall flags (isActive, isEndingSoon) for all jobs in database
+  // 1. Batch Query: Find existing jobs in MongoDB with a single query
+  const listingUrls = uniqueListings.map((l) => l.url);
+  const existingJobs = await Job.find(
+    { sourceUrl: { $in: listingUrls } },
+    'sourceUrl scrapedAt slug sourceHash'
+  ).lean();
+
+  interface ExistingJobRecord {
+    _id: Types.ObjectId;
+    sourceUrl: string;
+    scrapedAt: Date;
+    slug: string;
+    sourceHash?: string;
+  }
+
+  const existingMap = new Map<string, ExistingJobRecord>();
+  for (const job of existingJobs) {
+    existingMap.set(job.sourceUrl, job as unknown as ExistingJobRecord);
+  }
+
+  // 2. Pre-filter: Separate fresh jobs (<24 hours) from jobs that need scraping
+  const oneDayMs = 24 * 60 * 60 * 1000;
+  const now = Date.now();
+  const toProcess: ScrapedJobListing[] = [];
+
+  for (const item of uniqueListings) {
+    const existing = existingMap.get(item.url);
+    if (existing && existing.scrapedAt) {
+      const lastScrapedTime = new Date(existing.scrapedAt).getTime();
+      if (now - lastScrapedTime < oneDayMs) {
+        result.skipped++;
+        continue;
+      }
+    }
+    toProcess.push(item);
+  }
+
+  console.log(
+    `[Scraper Orchestrator] ${source}: ${uniqueListings.length} total, ${result.skipped} fresh (skipped), ${toProcess.length} to process.`
+  );
+
+  // 3. Process remaining jobs with controlled concurrency (4 workers)
+  if (toProcess.length > 0) {
+    const CONCURRENCY_LIMIT = 4;
+    await asyncPool(CONCURRENCY_LIMIT, toProcess, async (item) => {
+      try {
+        // Fetch detail page using keep-alive client
+        let detail: ScrapedJobDetail | null = null;
+        if (source === 'sarkariresult.com') {
+          detail = await scrapeSarkariResultDetail(item.url);
+        } else {
+          detail = await scrapeSarkariResultCmDetail(item.url);
+        }
+
+        if (!detail || !detail.title) {
+          result.errors++;
+          return;
+        }
+
+        // Normalize
+        const normalized = normalizeScrapedJob(detail, item, source);
+        const existingJob = existingMap.get(item.url);
+
+        // Deduplication check across sources (only for new jobs)
+        if (!existingJob) {
+          const candidate = await Job.findOne({
+            state: normalized.state,
+            category: normalized.category,
+          })
+            .select('title organization totalVacancies sourceUrl')
+            .lean();
+
+          if (
+            candidate &&
+            isDuplicateJob(
+              {
+                title: normalized.title || '',
+                organization: normalized.organization,
+                totalVacancies: normalized.totalVacancies,
+              },
+              {
+                title: candidate.title,
+                organization: candidate.organization,
+                totalVacancies: candidate.totalVacancies,
+              }
+            )
+          ) {
+            console.log(`[Deduplicator] Cross-source duplicate detected: "${normalized.title}". Skipping.`);
+            result.skipped++;
+            return;
+          }
+        }
+
+        // Upsert into MongoDB
+        if (existingJob) {
+          await Job.updateOne(
+            { _id: existingJob._id },
+            {
+              $set: {
+                ...normalized,
+                slug: existingJob.slug,
+                lastUpdated: new Date(),
+              },
+            }
+          );
+          result.updatedJobs++;
+        } else {
+          let slug = normalized.slug!;
+          const slugExists = await Job.findOne({ slug }).select('_id').lean();
+          if (slugExists) {
+            slug = `${slug}-${Date.now().toString().slice(-4)}`;
+            normalized.slug = slug;
+          }
+
+          await Job.create(normalized);
+          result.newJobs++;
+        }
+
+        // Polite micro-jitter delay per worker (150-350ms)
+        await sleep(getRandomDelay(150, 350));
+      } catch (err: unknown) {
+        result.errors++;
+        const message = err instanceof Error ? err.message : String(err);
+        console.error(`[Scraper Orchestrator] Error processing ${item.url}:`, message);
+      }
+    });
+  }
+
+  // Update status flags
   await updateJobStatusFlags();
 
   result.durationMs = Date.now() - startTime;
-  console.log(`[Scraper Orchestrator] Completed ${source}:`, result);
+  console.log(`[Scraper Orchestrator] Completed ${source} in ${(result.durationMs / 1000).toFixed(2)}s:`, result);
   return result;
 }
 
 /**
- * Runs all scrapers sequentially
+ * Runs all scrapers concurrently
  */
 export async function runAllScrapers(maxItems = 25): Promise<ScraperRunResult[]> {
+  console.log(`[Scraper Orchestrator] Running all scrapers concurrently (maxItems=${maxItems})...`);
+  const startTime = Date.now();
+
+  const settled = await Promise.allSettled([
+    runScraperForSource('sarkariresult.com', maxItems),
+    runScraperForSource('sarkariresult.com.cm', maxItems),
+  ]);
+
   const results: ScraperRunResult[] = [];
-  try {
-    const res1 = await runScraperForSource('sarkariresult.com', maxItems);
-    results.push(res1);
-  } catch (err) {
-    console.error('Error running sarkariresult.com scraper:', err);
+  for (const res of settled) {
+    if (res.status === 'fulfilled') {
+      results.push(res.value);
+    } else {
+      console.error('[Scraper Orchestrator] Scraper source execution failed:', res.reason);
+    }
   }
 
-  try {
-    const res2 = await runScraperForSource('sarkariresult.com.cm', maxItems);
-    results.push(res2);
-  } catch (err) {
-    console.error('Error running sarkariresult.com.cm scraper:', err);
-  }
+  // Single sweep to update overall flags after all sources complete
+  await updateJobStatusFlags();
 
+  const totalTime = ((Date.now() - startTime) / 1000).toFixed(2);
+  console.log(`[Scraper Orchestrator] All scrapers completed in ${totalTime}s.`);
   return results;
 }
 

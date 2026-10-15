@@ -1,11 +1,14 @@
 // ============================================================
 // Scraper for sarkariresult.com.cm
+// High-performance with persistent HTTP keep-alive & parallel listings
 // ============================================================
 
 import axios from 'axios';
+import http from 'http';
+import https from 'https';
 import * as cheerio from 'cheerio';
 import type { ScrapedJobListing, ScrapedJobDetail, PostType } from '@/types';
-import { getRandomUserAgent, sleep, getRandomDelay } from '@/lib/utils/userAgents';
+import { getRandomUserAgent } from '@/lib/utils/userAgents';
 import { cleanText } from '@/lib/utils/normalizer';
 import { parseSarkariDetailPage } from './parser';
 
@@ -17,17 +20,6 @@ const LISTING_PATHS: { path: string; postType: PostType }[] = [
   { path: '/result/', postType: 'Result' },
   { path: '/answer-key/', postType: 'Answer Key' },
 ];
-
-function createHttpClient() {
-  return axios.create({
-    timeout: 15000,
-    headers: {
-      'User-Agent': getRandomUserAgent(),
-      'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-      'Accept-Language': 'en-US,en;q=0.9,hi;q=0.8',
-    },
-  });
-}
 
 const EXCLUDED_SLUGS = [
   '/latest-jobs/',
@@ -42,23 +34,40 @@ const EXCLUDED_SLUGS = [
   '/about-us/',
 ];
 
+// Persistent HTTP client with connection pooling and socket reuse
+const httpClient = axios.create({
+  timeout: 12000,
+  httpAgent: new http.Agent({ keepAlive: true, maxSockets: 15, keepAliveMsecs: 30000 }),
+  httpsAgent: new https.Agent({ keepAlive: true, maxSockets: 15, keepAliveMsecs: 30000 }),
+  headers: {
+    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+    'Accept-Language': 'en-US,en;q=0.9,hi;q=0.8',
+    'Accept-Encoding': 'gzip, deflate, br',
+  },
+});
+
+httpClient.interceptors.request.use((config) => {
+  config.headers['User-Agent'] = getRandomUserAgent();
+  return config;
+});
+
 /**
- * Scrapes listing page from sarkariresult.com.cm
+ * Scrapes listing pages from sarkariresult.com.cm in parallel
  */
 export async function scrapeSarkariResultCmListings(maxItemsPerCategory = 25): Promise<ScrapedJobListing[]> {
-  const client = createHttpClient();
   const listings: ScrapedJobListing[] = [];
   const visitedUrls = new Set<string>();
 
-  for (const { path, postType } of LISTING_PATHS) {
+  console.log(`[sarkariresult.com.cm] Fetching ${LISTING_PATHS.length} listing categories in parallel...`);
+
+  const pagePromises = LISTING_PATHS.map(async ({ path, postType }) => {
     const url = `${BASE_URL}${path}`;
     try {
-      console.log(`[sarkariresult.com.cm] Fetching listing from: ${url}`);
-      const response = await client.get(url);
+      const response = await httpClient.get(url);
       const $ = cheerio.load(response.data);
-
+      const pageListings: ScrapedJobListing[] = [];
       let count = 0;
-      // Target job post links inside lists, articles, or entry contents
+
       $('ul li a, div.entry-content a, article h2 a').each((_, el) => {
         if (count >= maxItemsPerCategory) return false;
 
@@ -75,15 +84,10 @@ export async function scrapeSarkariResultCmListings(maxItemsPerCategory = 25): P
           return;
         }
 
-        // Filter out non-job and static pages
         const isExcluded = EXCLUDED_SLUGS.some((slug) => fullUrl.endsWith(slug) || fullUrl === `${BASE_URL}/`);
-        if (isExcluded || visitedUrls.has(fullUrl)) return;
+        if (isExcluded || !fullUrl.startsWith(BASE_URL)) return;
 
-        // Detail pages are usually slug-based on the domain
-        if (!fullUrl.startsWith(BASE_URL)) return;
-
-        visitedUrls.add(fullUrl);
-        listings.push({
+        pageListings.push({
           title,
           url: fullUrl,
           postType,
@@ -91,10 +95,23 @@ export async function scrapeSarkariResultCmListings(maxItemsPerCategory = 25): P
         count++;
       });
 
-      await sleep(getRandomDelay(1000, 2000));
+      return pageListings;
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err);
       console.warn(`[sarkariresult.com.cm] Error scraping listing ${url}:`, message);
+      return [];
+    }
+  });
+
+  const settled = await Promise.allSettled(pagePromises);
+  for (const result of settled) {
+    if (result.status === 'fulfilled') {
+      for (const item of result.value) {
+        if (!visitedUrls.has(item.url)) {
+          visitedUrls.add(item.url);
+          listings.push(item);
+        }
+      }
     }
   }
 
@@ -105,10 +122,8 @@ export async function scrapeSarkariResultCmListings(maxItemsPerCategory = 25): P
  * Scrapes detail page from sarkariresult.com.cm
  */
 export async function scrapeSarkariResultCmDetail(pageUrl: string): Promise<ScrapedJobDetail | null> {
-  const client = createHttpClient();
-
   try {
-    const response = await client.get(pageUrl);
+    const response = await httpClient.get(pageUrl);
     return parseSarkariDetailPage(response.data, pageUrl);
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);
