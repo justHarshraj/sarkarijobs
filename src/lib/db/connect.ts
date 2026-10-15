@@ -21,12 +21,15 @@ if (!cached) {
 }
 
 async function connectDB(): Promise<typeof mongoose> {
-  if (mongoose.connection.readyState >= 1) {
-    return mongoose;
+  // If already connected and ready, return existing instance immediately
+  if (mongoose.connection.readyState === 1 && cached.conn) {
+    return cached.conn;
   }
 
-  if (cached.conn) {
-    return cached.conn;
+  // If connection dropped or disconnected, clear stale promise so we reconnect cleanly
+  if (mongoose.connection.readyState === 0) {
+    cached.promise = null;
+    cached.conn = null;
   }
 
   const uri = process.env.MONGODB_URI;
@@ -43,7 +46,7 @@ async function connectDB(): Promise<typeof mongoose> {
 
   if (!cached.promise) {
     const opts: mongoose.ConnectOptions = {
-      bufferCommands: false,
+      bufferCommands: true, // Allow buffering while initial handshake completes
       maxPoolSize: 10,
       minPoolSize: 1,
       serverSelectionTimeoutMS: 10000, // 10s gives MongoDB Atlas sufficient time for TLS handshake
@@ -58,6 +61,7 @@ async function connectDB(): Promise<typeof mongoose> {
       })
       .catch((error) => {
         cached.promise = null;
+        cached.conn = null;
         console.error('❌ MongoDB connection error:', sanitizeText(error?.message || error));
         throw new Error('Database connection failed');
       });
@@ -67,6 +71,7 @@ async function connectDB(): Promise<typeof mongoose> {
     cached.conn = await cached.promise;
   } catch (e) {
     cached.promise = null;
+    cached.conn = null;
     throw e;
   }
 

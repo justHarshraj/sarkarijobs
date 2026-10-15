@@ -4,6 +4,7 @@ import { getScraperStatus } from '@/lib/scraper/scheduler';
 import { getSafeErrorMessage } from '@/lib/utils/sanitizer';
 import type { PostType } from '@/types';
 
+export const dynamic = 'force-dynamic';
 // Allow up to 60s execution window for bulk scraper on Vercel
 export const maxDuration = 60;
 
