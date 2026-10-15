@@ -4,6 +4,9 @@ import { getScraperStatus } from '@/lib/scraper/scheduler';
 import { getSafeErrorMessage } from '@/lib/utils/sanitizer';
 import type { PostType } from '@/types';
 
+// Allow up to 60s execution window for bulk scraper on Vercel
+export const maxDuration = 60;
+
 export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
   const shouldRun =
@@ -26,7 +29,7 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   try {
     let source = 'all';
-    let limit = 100;
+    let limit = 200;
     let concurrency = 10;
     let forceRefresh = false;
     let category: PostType | 'all' | undefined = undefined;

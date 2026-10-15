@@ -6,7 +6,6 @@ import { useRouter, usePathname } from 'next/navigation';
 import {
   Briefcase,
   Search,
-  Clock,
   Menu,
   X,
   CreditCard,
@@ -14,6 +13,7 @@ import {
   Layers,
   Sparkles,
   TrendingUp,
+  RotateCw,
 } from 'lucide-react';
 
 interface HeaderProps {
@@ -28,6 +28,31 @@ export default function Header({}: HeaderProps) {
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [isMobileSearchOpen, setIsMobileSearchOpen] = useState(false);
   const [activeSection, setActiveSection] = useState<string>('');
+  const [isSyncing, setIsSyncing] = useState(false);
+  const [syncLabel, setSyncLabel] = useState('Auto-Sync (1h)');
+
+  const handleManualSync = async (e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
+    if (isSyncing) return;
+    setIsSyncing(true);
+    setSyncLabel('Syncing...');
+    try {
+      const res = await fetch('/api/scraper/trigger?run=true&limit=200');
+      if (res.ok) {
+        setSyncLabel('Synced!');
+        router.refresh();
+        setTimeout(() => setSyncLabel('Auto-Sync (1h)'), 3000);
+      } else {
+        setSyncLabel('Failed');
+        setTimeout(() => setSyncLabel('Auto-Sync (1h)'), 3000);
+      }
+    } catch {
+      setSyncLabel('Failed');
+      setTimeout(() => setSyncLabel('Auto-Sync (1h)'), 3000);
+    } finally {
+      setIsSyncing(false);
+    }
+  };
 
   const popularSearches = ['Railway', 'UPSC', 'SSC CGL', 'Police', 'Banking', '10th Pass'];
 
@@ -244,18 +269,21 @@ export default function Header({}: HeaderProps) {
                 );
               })}
 
-              {/* Automated Background Sync Status Badge */}
-              <div
-                title="Automated 24/7 background sync: Runs on website startup & every 6 hours"
-                className="ml-2 px-3 py-1.5 rounded-xl bg-emerald-50/90 border border-emerald-200/80 text-emerald-800 font-bold text-xs flex items-center gap-2 shadow-2xs select-none cursor-default"
+              {/* Automated Background Sync Status Button */}
+              <button
+                type="button"
+                onClick={handleManualSync}
+                disabled={isSyncing}
+                title="Automated 24/7 background sync: Runs every 1 hour & on startup. Click to sync now!"
+                className="ml-2 px-3 py-1.5 rounded-xl bg-emerald-50/90 hover:bg-emerald-100/90 border border-emerald-200/80 text-emerald-800 font-bold text-xs flex items-center gap-2 shadow-2xs select-none transition-colors cursor-pointer"
               >
                 <span className="relative flex h-2 w-2">
-                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                  <span className={`absolute inline-flex h-full w-full rounded-full bg-emerald-400 ${isSyncing ? 'animate-ping opacity-100' : 'opacity-75'}`}></span>
                   <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
                 </span>
-                <Clock className="w-3.5 h-3.5 text-emerald-600" />
-                <span>Auto-Sync (6h)</span>
-              </div>
+                <RotateCw className={`w-3.5 h-3.5 text-emerald-600 ${isSyncing ? 'animate-spin' : ''}`} />
+                <span>{syncLabel}</span>
+              </button>
             </div>
 
             {/* Mobile Controls (Search trigger, Automated indicator, Hamburger) */}
@@ -268,14 +296,17 @@ export default function Header({}: HeaderProps) {
                 <Search className="w-5 h-5" />
               </button>
 
-              {/* Mobile Auto-Sync Status Badge */}
-              <div
-                title="Automated sync active: On startup & every 6 hours"
-                className="px-2 py-1 rounded-lg bg-emerald-50 border border-emerald-200/80 text-emerald-800 text-[10px] font-bold flex items-center gap-1.5 select-none"
+              {/* Mobile Auto-Sync Status Button */}
+              <button
+                type="button"
+                onClick={handleManualSync}
+                disabled={isSyncing}
+                title="Automated sync: Every 1h & startup. Tap to sync now!"
+                className="px-2 py-1 rounded-lg bg-emerald-50 hover:bg-emerald-100 border border-emerald-200/80 text-emerald-800 text-[10px] font-bold flex items-center gap-1.5 select-none transition-colors"
               >
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                <span>6h Sync</span>
-              </div>
+                <RotateCw className={`w-3 h-3 text-emerald-600 ${isSyncing ? 'animate-spin' : ''}`} />
+                <span>{isSyncing ? 'Syncing...' : '1h Sync'}</span>
+              </button>
 
               <button
                 onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
@@ -316,7 +347,7 @@ export default function Header({}: HeaderProps) {
               <div className="pt-2 border-t border-slate-100 flex items-center justify-between text-xs text-slate-500">
                 <span className="flex items-center gap-1.5 font-semibold text-emerald-700">
                   <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-                  Auto-Sync Active (Startup & Every 6h)
+                  Auto-Sync Active (Startup & Every 1h)
                 </span>
                 <Link
                   href="/#categories"

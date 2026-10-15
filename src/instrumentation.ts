@@ -16,9 +16,9 @@ export async function register() {
       console.log('🚀 [Instrumentation] Website initialization detected: Starting sync engine & initial scrape...');
       const { initScraperScheduler } = await import('@/lib/scraper/scheduler');
       const { updateJobStatusFlags } = await import('@/lib/scraper');
-      const cronExpr = process.env.SCRAPER_CRON || '0 */6 * * *';
+      const cronExpr = process.env.SCRAPER_CRON || '0 * * * *';
 
-      // 1. Initialize recurring 6-hour cron job and trigger immediate startup scrape
+      // 1. Initialize recurring 1-hour cron job and trigger immediate startup scrape
       initScraperScheduler(cronExpr, true);
 
       // 2. Perform initial startup flag update

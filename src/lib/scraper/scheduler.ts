@@ -44,26 +44,26 @@ export async function triggerScrape(reason = 'manual', maxItems = 150) {
 }
 
 /**
- * Initializes the automated scraping schedule (every 6 hours)
+ * Initializes the automated scraping schedule (every hour)
  * and triggers an immediate scrape on website initialization.
- * Schedule: At minute 0 past every 6th hour (00:00, 06:00, 12:00, 18:00)
+ * Schedule: At minute 0 of every hour (0 * * * *)
  */
-export function initScraperScheduler(cronExpression = '0 */6 * * *', runOnStartup = true) {
+export function initScraperScheduler(cronExpression = '0 * * * *', runOnStartup = true) {
   if (cronJobInstance) {
     console.log('[Scheduler] ⏰ Cron job already active.');
     if (runOnStartup && !hasInitializedScrape && !isScraperRunning) {
-      triggerScrape('website-initialization', 150).catch((err) =>
+      triggerScrape('website-initialization', 200).catch((err) =>
         console.error('[Scheduler] Initial startup scrape warning:', err)
       );
     }
     return cronJobInstance;
   }
 
-  console.log(`[Scheduler] ⏰ Initializing automated 6-hour scraper with schedule: "${cronExpression}"`);
+  console.log(`[Scheduler] ⏰ Initializing automated 1-hour scraper with schedule: "${cronExpression}"`);
 
   cronJobInstance = cron.schedule(cronExpression, async () => {
-    console.log(`[Scheduler] ⏰ Scheduled 6-hour auto-sync triggered at: ${new Date().toISOString()}`);
-    await triggerScrape('scheduled-6h-cron', 150).catch((err) =>
+    console.log(`[Scheduler] ⏰ Scheduled 1-hour auto-sync triggered at: ${new Date().toISOString()}`);
+    await triggerScrape('scheduled-hourly-cron', 200).catch((err) =>
       console.error('[Scheduler] Error during scheduled cron scrape:', err)
     );
   });
@@ -71,7 +71,7 @@ export function initScraperScheduler(cronExpression = '0 */6 * * *', runOnStartu
   // Trigger immediate scrape upon website initialization
   if (runOnStartup && !hasInitializedScrape) {
     console.log('[Scheduler] 🚀 Website initialization detected: Running immediate initial scrape...');
-    triggerScrape('website-initialization', 150).catch((err) =>
+    triggerScrape('website-initialization', 200).catch((err) =>
       console.error('[Scheduler] Initial startup scrape warning:', err)
     );
   }
@@ -101,7 +101,7 @@ export function getScraperStatus() {
   return {
     isRunning: isScraperRunning,
     isScheduled: cronJobInstance !== null,
-    schedule: 'Every 6 hours (0 */6 * * *) + on website initialization',
+    schedule: 'Every hour (0 * * * *) + on website initialization',
     lastRunTime: lastRunTime ? lastRunTime.toISOString() : null,
     lastRunDurationMs,
     hasInitializedScrape,
