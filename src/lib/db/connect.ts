@@ -46,7 +46,7 @@ async function connectDB(): Promise<typeof mongoose> {
       bufferCommands: false,
       maxPoolSize: 10,
       minPoolSize: 1,
-      serverSelectionTimeoutMS: 3500, // Fast fail in 3.5s so serverless requests do not stall
+      serverSelectionTimeoutMS: 10000, // 10s gives MongoDB Atlas sufficient time for TLS handshake
       socketTimeoutMS: 30000,
     };
 
